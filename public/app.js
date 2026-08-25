@@ -2115,7 +2115,7 @@ const fuzzyCatalog = (query, limit = 8) => {
       results = ranked;
       // sembrar el Auto-DJ: por artista si es una canción, si no por la consulta (género/época)
       const isGenre = smart || searchType !== 'track';
-      autoDjSeed = { artist: isGenre ? '' : (results[0] ? (results[0].artist || results[0].channel || '') : ''), query: displayQ };
+      autoDjSeed = { artist: '', query: displayQ }; // la radio se guía por la consulta/género, no por un artista suelto
       searchMeta = null;
       const n = results.length;
       if (n) {
@@ -2396,6 +2396,19 @@ const fuzzyCatalog = (query, limit = 8) => {
     }
   });
 
+  const btnShare = $('#btn-share');
+  btnShare.addEventListener('click', async () => {
+    const seed = (autoDjSeed.query || lastQuery || input.value.trim());
+    if (!seed) { showToast('🔗 Primero busca un género y activa el 📻 para compartir la radio'); return; }
+    const url = location.origin + location.pathname + '?radio=' + encodeURIComponent(seed);
+    try {
+      await navigator.clipboard.writeText(url);
+      showToast('🔗 Enlace de la radio copiado: ' + seed);
+    } catch (e) {
+      window.prompt('Copiar enlace de la radio:', url);
+    }
+  });
+
   autonext.addEventListener('change', () => { pushNativeQueue(); });
 
   seek.addEventListener('input', () => {
@@ -2438,6 +2451,8 @@ const fuzzyCatalog = (query, limit = 8) => {
     lastEvtTime = audio.currentTime;
     pushPosition();
     if (audio.duration && isFinite(audio.duration) && audio.duration - audio.currentTime <= 15) warmNext();
+    // Radio infinita: si queda poco en cola, anticipar la búsqueda para que nunca haya silencio
+    if (autoDjOn && !autoDjBusy && results.length - 1 - current <= 2) extendAutoDj();
   });
   audio.addEventListener('seeked', () => {
     lastEvtAt = performance.now();
@@ -2786,4 +2801,17 @@ const fuzzyCatalog = (query, limit = 8) => {
     } catch (ignored) { }
   };
   restoreUiState();
+
+  // ---- Auto-arranque de radio desde enlace compartido (?radio=género) ----
+  // El navegador bloquea el autoplay con sonido sin un gesto del usuario, así que la
+  // cola y el Auto-DJ se arman solos y el amigo solo debe pulsar ▶ una vez.
+  (() => {
+    const rp = new URLSearchParams(location.search).get('radio') || new URLSearchParams(location.search).get('q');
+    if (!rp) return;
+    autoDjOn = true;
+    if (btnAutodj) btnAutodj.classList.add('on');
+    input.value = rp;
+    showToast('📻 Radio automática: ' + rp);
+    smartPlaylistSearch(rp, rp);
+  })();
 })();
