@@ -22,7 +22,10 @@
     }
     .logo { font-size: 26px; font-weight: 800; letter-spacing: 1px; margin-bottom: 4px;
       background: linear-gradient(90deg, var(--neon), var(--neon2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-    .station { font-size: 13px; color: #9fb6d4; text-transform: uppercase; letter-spacing: 2px; margin: 10px 0 18px; }
+    .station { font-size: 13px; color: #9fb6d4; text-transform: uppercase; letter-spacing: 2px; margin: 10px 0 18px; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #44506a; box-shadow: 0 0 8px rgba(0,0,0,0.4); }
+    .dot.on { background: #25e08a; box-shadow: 0 0 10px rgba(37,224,138,0.8); }
+    .dot.off { background: #ff5d5d; box-shadow: 0 0 10px rgba(255,93,93,0.8); }
     .cover { width: 180px; height: 180px; border-radius: 16px; margin: 0 auto 16px; object-fit: cover;
       background: #0c1322; box-shadow: 0 0 30px rgba(25,227,255,0.25); display: none; }
     .title { font-size: 20px; font-weight: 700; line-height: 1.25; margin: 0 0 4px; }
@@ -34,18 +37,16 @@
       background: linear-gradient(90deg, var(--neon), var(--neon2)); box-shadow: 0 0 24px rgba(25,227,255,0.4);
     }
     .enter:active { transform: scale(0.97); }
-    .hint { font-size: 11px; color: #5f7390; }
     #yt-host { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; overflow: hidden; }
-    .footer { margin-top: 18px; font-size: 11px; color: #5f7390; }
   </style>
 </head>
 <body>
   <div class="card">
     <div class="logo">♪ NEON MUSIC</div>
-    <div class="station" id="station">RADIO EN VIVO</div>
+    <div class="station"><span class="dot" id="dot"></span><span id="station">NEON MUSIC</span></div>
     <img class="cover" id="cover" alt="" />
-    <div class="title" id="title">Esperando al DJ…</div>
-    <div class="artist" id="artist">El que comparte eligió la música</div>
+    <div class="title" id="title">NEON MUSIC</div>
+    <div class="artist" id="artist"></div>
     <div class="status" id="status"></div>
     <button class="enter" id="enter">▶ Entrar a la radio</button>
   </div>

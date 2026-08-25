@@ -8,6 +8,7 @@
   const elCover = document.getElementById('cover');
   const btnEnter = document.getElementById('enter');
   const card = document.querySelector('.card');
+  const dot = document.getElementById('dot');
 
   let player = null;
   let ready = false;
@@ -18,7 +19,7 @@
 
   const YT_READY = Promise.race([
     new Promise((resolve) => { window.__ytListenReady = resolve; }),
-    new Promise((resolve) => setTimeout(() => resolve(false), 8000)),
+    new Promise((resolve) => setTimeout(() => resolve(false), 10000)),
   ]);
   window.onYouTubeIframeAPIReady = () => { if (window.__ytListenReady) window.__ytListenReady(true); };
 
@@ -27,14 +28,10 @@
     player = new YT.Player('yt-host', {
       playerVars: { autoplay: 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, fs: 0, playsinline: 1 },
       events: {
-        onReady: () => {
-          ready = true;
-          cueCurrent();
-          if (lastData.playing) { try { player.playVideo(); } catch (e) {} } // intento automático (mismo navegador del DJ)
-        },
+        onReady: () => { ready = true; applyState(); },
         onStateChange: (e) => {
           const S = (window.YT && window.YT.PlayerState) || {};
-          if (e.data === S.PLAYING) { currentPlaying = true; userStarted = true; btnEnter.style.display = 'none'; }
+          if (e.data === S.PLAYING) { currentPlaying = true; userStarted = true; btnEnter.style.display = 'none'; elStatus.textContent = ''; }
           else if (e.data === S.PAUSED) currentPlaying = false;
         },
         onError: () => { elStatus.textContent = 'Este tema está bloqueado por YouTube; esperando el siguiente…'; },
@@ -42,19 +39,15 @@
     });
   };
 
-  // Precarga el video en cuanto sabemos cuál es (sin sonar), para que el tap sea instantáneo
-  const cueCurrent = () => {
-    if (!ready || !player || !lastData.id) return;
-    if (lastData.id !== currentId) {
+  // Refleja el estado del DJ: precarga el video y reproduce/pausa según corresponda.
+  // El play se intenta en cada consulta (reproducción automática si el navegador lo permite).
+  const applyState = () => {
+    if (!ready || !player) return;
+    if (lastData.id && lastData.id !== currentId) {
       currentId = lastData.id;
       try { player.cueVideoById(lastData.id); } catch (e) {}
     }
-  };
-
-  // Sigue al DJ: reproduce/pausa según el estado compartido (solo si el amigo ya inició)
-  const syncPlay = () => {
-    if (!ready || !player || !userStarted) return;
-    if (lastData.playing && !currentPlaying) { try { player.playVideo(); } catch (e) {} currentPlaying = true; }
+    if (lastData.playing && !currentPlaying) { try { player.playVideo(); } catch (e) {} }
     else if (!lastData.playing && currentPlaying) { try { player.pauseVideo(); } catch (e) {} currentPlaying = false; }
   };
 
@@ -76,16 +69,14 @@
     try {
       const r = await fetch('/api/nowplaying');
       const d = await r.json();
+      if (dot) dot.className = 'dot on';
       lastData = d || lastData;
       render(d);
-      if (d.id) {
-        elStatus.textContent = '';
-        cueCurrent();           // precarga aunque aún no haya tap
-        if (userStarted) syncPlay();
-      } else {
-        elStatus.textContent = '';
-      }
+      if (d.id) elStatus.textContent = '';
+      else elStatus.textContent = '';
+      applyState();
     } catch (e) {
+      if (dot) dot.className = 'dot off';
       elStatus.textContent = 'Sin conexión con la radio…';
     }
   };
@@ -95,13 +86,11 @@
     userStarted = true;
     btnEnter.style.display = 'none';
     elStatus.textContent = 'Conectando a la radio…';
-    // ya está precargado: arranca de inmediato si el DJ está sonando
     if (ready && currentId) { try { player.playVideo(); } catch (e) {} currentPlaying = true; }
-    syncPlay();
+    applyState();
   };
 
   btnEnter.addEventListener('click', enter);
-  // un solo toque en cualquier parte de la tarjeta inicia la escucha
   if (card) card.addEventListener('click', () => { if (!userStarted) enter(); });
 
   YT_READY.then((ok) => { if (ok) startPlayer(); else elStatus.textContent = 'No se pudo cargar el reproductor de YouTube'; });
