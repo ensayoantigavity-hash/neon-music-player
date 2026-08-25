@@ -203,19 +203,20 @@
   audio.addEventListener('playing', () => { if (nativeMode) return; spin(true); setIcon(); userPaused = false; statusEl.textContent = ''; });
   audio.addEventListener('pause', () => { if (nativeMode) return; spin(false); setIcon(); });
   audio.addEventListener('ended', () => {
-    if (nativeMode) return; // en APK el avance lo maneja el reproductor nativo
-    if (currentSource !== 'local') return;
-    if (playingJingle) { playingJingle = false; playLocalNext(); }
-    else { playJingle(); }
+    if (nativeMode) return;
+    if (currentSource === 'local') {
+      if (playingJingle) { playingJingle = false; startLocal(); }
+      else { playJingle(); }
+    }
   });
   audio.addEventListener('error', () => {
-    if (nativeMode) return; // en APK el error lo maneja el reproductor nativo
+    if (nativeMode) return;
     if (currentSource === 'local') {
       if (currentYtId && currentYtId !== JINGLE) blockedIds.add(currentYtId);
-      statusEl.textContent = 'Bloqueado por YouTube · saltando al siguiente…';
-      playLocalNext();
+      statusEl.textContent = 'Esperando transmisión…';
+      startLocal();
     } else if (currentSource === 'master') {
-      statusEl.textContent = 'Este tema está bloqueado por YouTube en tu región; sigue al DJ…';
+      statusEl.textContent = 'Esperando al DJ…';
     }
   });
 
@@ -269,45 +270,8 @@
     else if (!d.playing && !audio.paused) { audio.pause(); }
   };
 
-  // ---- modo local: radio propia cuando nadie transmite ----
-  const fetchBatch = async (genre) => {
-    try {
-      const r = await fetch('/api/search?q=' + encodeURIComponent(genre) + '&type=playlist');
-      const j = await r.json();
-      if (j && Array.isArray(j.results) && j.results.length) return j.results;
-    } catch (e) {}
-    return [];
-  };
-
-  const playLocalNext = async () => {
-    if (currentSource !== 'local') return;
-    if (!localQueue.length) {
-      statusEl.textContent = 'Cargando radio…';
-      let batch = await fetchBatch(localGenre);
-      if (!batch.length) {
-        localGenre = GENRES[(GENRES.indexOf(localGenre) + 1) % GENRES.length];
-        batch = await fetchBatch(localGenre);
-      }
-      if (currentSource !== 'local') return;
-      if (batch.length) localQueue = batch; else { statusEl.textContent = 'Sin conexión con la radio…'; return; }
-    }
-    const t = localQueue.shift();
-    if (!t || !t.id) return;
-    if (blockedIds.has(t.id)) return playLocalNext();
-    elStation.textContent = 'NEON MUSIC · RADIO';
-    setTrack(t.id, t);
-    statusEl.textContent = '';
-    localCount++;
-    if (localCount % 12 === 0) localGenre = GENRES[(GENRES.indexOf(localGenre) + 1) % GENRES.length];
-  };
-
-  const startLocal = async () => {
-    currentSource = 'local';
-    elStation.textContent = 'NEON MUSIC · RADIO';
-    await playLocalNext();
-  };
-
-  // cortina de identidad de la radio entre tema y tema
+  // ---- modo escucha puro: solo reproduce lo que emite el DJ en onrender ----
+  // Sin radio local ni búsquedas propias: si no hay master, espera.
   const playJingle = () => {
     playingJingle = true;
     currentYtId = JINGLE;
@@ -318,8 +282,16 @@
     spin(true);
     const jurl = absoluteUrl(JINGLE);
     try { if (window.AndroidBridge && window.AndroidBridge.updateTrack) window.AndroidBridge.updateTrack('Estás escuchando Neon Music', '', jurl); } catch (e) {}
-    if (nativeMode) return; // suena en el reproductor nativo
+    if (nativeMode) return;
     audio.muted = false; audio.src = JINGLE; audio.play().catch(() => {});
+  };
+  // Placeholders para compatibilidad con handlers nativos (ya no hay cola local)
+  const playLocalNext = async () => {};
+  const startLocal = async () => {
+    currentSource = 'idle';
+    elStation.textContent = 'NEON MUSIC · EN ESPERA';
+    statusEl.textContent = 'Esperando transmisión del DJ…';
+    spin(false);
   };
 
   // ---- consulta el estado del master ----
@@ -353,7 +325,7 @@
   };
   window.__neonTrackEnded = () => {
     if (currentSource === 'local') {
-      if (playingJingle) { playingJingle = false; playLocalNext(); }
+      if (playingJingle) { playingJingle = false; startLocal(); }
       else { playJingle(); }
     } else if (currentSource === 'master') {
       masterGone().then((gone) => { if (gone) startLocal(); });
@@ -362,8 +334,8 @@
   window.__neonTrackError = () => {
     if (currentSource === 'local') {
       if (currentYtId && currentYtId !== JINGLE) blockedNativeIds.add(currentYtId);
-      if (playingJingle) { playingJingle = false; playLocalNext(); }
-      else { playJingle(); }
+      if (playingJingle) { playingJingle = false; startLocal(); }
+      else { startLocal(); }
     } else if (currentSource === 'master') {
       if (currentYtId && currentYtId !== JINGLE) blockedNativeIds.add(currentYtId);
       masterGone().then((gone) => { if (gone) startLocal(); });
@@ -381,13 +353,10 @@
     }
     if (!audio.paused) { audio.pause(); userPaused = true; return; }
     userPaused = false;
-    if (lastData && lastData.id) {
-      followMaster(lastData);            // sincroniza al tema actual del master
-    } else if (currentSource === 'local') {
-      if (currentYtId && currentYtId !== JINGLE) audio.play().catch(() => {});
-      else playLocalNext();              // no hay tema local aún: busca uno
+    if (lastMasterData && lastMasterData.id) {
+      followMaster(lastMasterData);
     } else {
-      startLocal();                      // arranca la radio autónoma
+      startLocal();
     }
   });
 
