@@ -12,3 +12,7 @@ deeplink/
 *.bat
 *.url
 .DS_Store
+
+audio neon muisica.mp3
+*.mp3
+
