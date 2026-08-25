@@ -5,10 +5,9 @@ import { Server } from 'socket.io';
 import { createRequire } from 'node:module';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
+import { exec } from 'node:child_process';
 
 const require = createRequire(import.meta.url);
-const ytdlp = require('youtube-dl-exec').create(path.resolve('yt-dlp'));
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
@@ -21,8 +20,7 @@ const COOKIES = path.resolve('cookies.txt');
 const PORT = process.env.PORT || 10000;
 
 let djConnected = false, currentDJSocket = null, autoDJProcess = null;
-let listeners = [], radioQueue = [], lastPlayed = null;
-const broadcast = new PassThrough();
+let listeners = [];
 
 app.get('/radio/stream', (req, res) => {
   res.writeHead(200, {
@@ -39,25 +37,31 @@ app.get('/radio/stream', (req, res) => {
 
 function startAutoDJ() {
   if (djConnected || autoDJProcess) return;
-  autoDJProcess = ytdlp.exec(['--cookies', COOKIES, '-f', 'bestaudio', '-o', '-', 'ytsearch:lofi music radio en vivo'], { stdio: ['ignore', 'pipe', 'pipe'] });
+  console.log("Iniciando Auto-DJ de respaldo...");
   
-  autoDJProcess.child.stdout.on('data', c => {
+  // Usamos un comando nativo del sistema llamando directamente a yt-dlp instalado por la librería
+  const cmd = `npx yt-dlp --cookies "${COOKIES}" -f bestaudio -o - "ytsearch:lofi music radio en vivo"`;
+  
+  autoDJProcess = exec(cmd, { maxBuffer: 1024 * 1024 * 50 });
+  
+  autoDJProcess.stdout.on('data', c => {
     if (djConnected) { stopAutoDJ(); return; }
     listeners.forEach(r => { try { r.write(c); } catch {} });
   });
   
-  autoDJProcess.child.on('close', () => {
+  autoDJProcess.on('close', () => {
     autoDJProcess = null;
     if (!djConnected) startAutoDJ();
   });
   
-  autoDJProcess.catch(() => { autoDJProcess = null; });
+  autoDJProcess.on('error', () => { autoDJProcess = null; });
 }
 
 function stopAutoDJ() {
   if (autoDJProcess) {
-    try { autoDJProcess.child.kill(); } catch {}
+    try { autoDJProcess.kill(); } catch {}
     autoDJProcess = null;
+    console.log("Auto-DJ detenido.");
   }
 }
 
