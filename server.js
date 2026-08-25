@@ -627,7 +627,7 @@ app.get('/api/search', async (req, res) => {
       for (const r of rawSets) {
         if (r.status !== 'fulfilled') continue;
         for (const t of r.value) {
-          if (!isMusicVideo(t, 7200)) continue;
+          if (!isMusicVideo(t)) continue;
           if (seen.has(t.id)) continue;
           seen.set(t.id, t);
         }

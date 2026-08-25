@@ -2740,20 +2740,14 @@ const fuzzyCatalog = (query, limit = 8) => {
     // nada reintentar con otros "modos"; saltamos de inmediato al siguiente.
     if (audio.__isShim && audio.mode === 'yt') {
       const track = !playingFile ? listOf(activeSrc)[current] : null;
-      const msg = (audio.error && audio.error.message) || 'Video bloqueado por YouTube';
-      dbg('✖ yt error ' + (audio.error ? audio.error.code : '?') + ' · ' + (track ? track.id : 'archivo'));
-      stopAgc(); setPlaying({ playing: false }); pushPlaying(false); updateMss(false);
+      dbg('✖ yt bloqueado ' + (audio.error ? audio.error.code : '?') + ' · ' + (track ? track.id : 'archivo'));
       if (track) blockedYt.add(track.id);
-      // El video está bloqueado para inserción: en lugar de saltarlo, lo reproducimos
-      // vía el stream del servidor (yt-dlp), que no tiene esa restricción. A partir de
-      // aquí TODAS las canciones usan stream, así ninguna vuelve a bloquearse.
-      useStream = true;
-      if (track && !playingFile) {
-        showToast('🔄 Video bloqueado en embebido: reproduciendo vía stream…');
-        play(current); // rehecha con stream (play() ahora toma la ruta de /api/stream)
-        return;
-      }
-      statusText.textContent = '⚠ ' + msg;
+      // Bloqueo de embebido: saltar directo al siguiente tema sin pausa ni toast bloqueante
+      statusText.textContent = 'cargando stream…';
+      const n = !playingFile ? nextIndex() : -1;
+      if (n >= 0 && autonext.checked) { setTimeout(()=>play(n), 200); return; }
+      stopAgc(); setPlaying({ playing: false }); pushPlaying(false); updateMss(false);
+      statusText.textContent = '⚠ Video bloqueado';
       return;
     }
     const track = playingFile ? null : listOf(activeSrc)[current];
