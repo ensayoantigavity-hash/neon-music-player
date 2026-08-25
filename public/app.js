@@ -433,6 +433,7 @@
   // ---------- estado ----------
   const PLAYLIST_KEY = 'neon_playlist';
   let results = [];
+  let pending = null; // búsqueda nueva en espera: no interrumpe la canción que suena
   let plist = JSON.parse(localStorage.getItem(PLAYLIST_KEY) || '[]');
   let lastQuery = '';
   let current = -1;
@@ -652,7 +653,9 @@
   };
 
   const makeHero = () => {
-    if (!searchMeta || !results.length) return null;
+    const meta = pending ? pending.meta : searchMeta;
+    const list = pending ? pending.results : results;
+    if (!meta || !list.length) return null;
     const li = document.createElement('li');
     li.innerHTML = `
       <div class="hero-card">
@@ -664,14 +667,14 @@
         </div>
       </div>`;
     const img = li.querySelector('.hero-img');
-    if (searchMeta.img) { img.src = searchMeta.img; img.onerror = () => { img.style.display = 'none'; }; }
+    if (meta.img) { img.src = meta.img; img.onerror = () => { img.style.display = 'none'; }; }
     else img.style.display = 'none';
-    li.querySelector('.hero-kind').textContent = searchMeta.kind === 'artist' ? 'ARTISTA'
-      : searchMeta.kind === 'playlist' ? 'LISTA DE REPRODUCCIÓN'
-      : searchMeta.kind === 'smart' ? 'LO MÁS SONADO'
-      : searchMeta.kind === 'track' ? 'CANCIÓN' : `ÁLBUM · ${searchMeta.album || ''}`;
-    li.querySelector('.hero-name').textContent = searchMeta.name;
-    li.querySelector('.hero-sub').textContent = searchMeta.sub;
+    li.querySelector('.hero-kind').textContent = meta.kind === 'artist' ? 'ARTISTA'
+      : meta.kind === 'playlist' ? 'LISTA DE REPRODUCCIÓN'
+      : meta.kind === 'smart' ? 'LO MÁS SONADO'
+      : meta.kind === 'track' ? 'CANCIÓN' : `ÁLBUM · ${meta.album || ''}`;
+    li.querySelector('.hero-name').textContent = meta.name;
+    li.querySelector('.hero-sub').textContent = meta.sub;
     return li;
   };
 
@@ -717,8 +720,9 @@
       const active = activeSrc === mode && current === i && !playingFile;
       li.querySelector('.item').classList.toggle('active', active);
 
-      li.addEventListener('click', () => playFrom(i, mode, true));
-      li.querySelector('.byte-play').addEventListener('click', (e) => { e.stopPropagation(); playFrom(i, mode, true); });
+      const onPick = () => { if (mode === 'results') commitPending(); playFrom(i, mode, true); };
+      li.addEventListener('click', onPick);
+      li.querySelector('.byte-play').addEventListener('click', (e) => { e.stopPropagation(); onPick(); });
       li.querySelector('.byte-dl').addEventListener('click', (e) => { e.stopPropagation(); downloadTrack(track, e.currentTarget); });
 
       const x = li.querySelector('.byte-x');
@@ -747,7 +751,7 @@ updatePlaylistCount();
     container.appendChild(frag);
   };
 
-  const renderResults = () => renderList(panelResults, results, 'results', { hero: makeHero() });
+  const renderResults = () => renderList(panelResults, pending ? pending.results : results, 'results', { hero: makeHero() });
   const renderPlaylist = () => renderList(panelPlaylist, plist, 'playlist');
 
   const renderActiveList = () => {
@@ -2059,7 +2063,7 @@ const fuzzyCatalog = (query, limit = 8) => {
   // ---------- enrutamiento inteligente (épocas / géneros / "lo más sonado") ----------
   const GENRE_LIST = ['salsa','rock','bachata','merengue','cumbia','reggaeton','pop','vallenato','balada','jazz','blues','clasica','electronica','house','techno','banda','corridos','nortena','ranchera','metal','punk','indie','hip hop','rap','dance','dubstep','lofi','kpop','opera','gospel','soul','funk','disco','country','folk','trova','bolero','tango','flamenco','cuarteto','reggae','ska','swing','new wave','synth','grunge','heavy metal','afrobeat','dembow','tropical','romantica','navidad','cristiana','infantil','dancehall'];
   const ERA_RE = /\b(80|90|70|60)s?\b|\bde\s+los\s+(ochenta|noventa|setenta|sesenta|80|90|70|60)\b|\bdecada\s+de\s+los\s+(80|90|70|60)\b/;
-  const PLAYLIST_HINTS_RE = /\b(clasicos|clasicas|clasica|classic|exitos|mix|lo mas sonado|lo mas sonadas|mas sonadas|mas escuchadas|del momento|grandes exitos|los mejores|mejores canciones|hits|best of|greatest|golden|top|todas las canciones|temas de oro)\b/;
+  const PLAYLIST_HINTS_RE = /\b(clasico|clásico|clasicos|clasicas|clasica|classic|exitos|mix|lo mas sonado|lo mas sonadas|mas sonadas|mas escuchadas|del momento|grandes exitos|los mejores|mejores canciones|hits|best of|greatest|golden|top|todas las canciones|temas de oro)\b/;
 
   const smartGenre = (t) => {
     for (const g of GENRE_LIST) {
@@ -2079,6 +2083,48 @@ const fuzzyCatalog = (query, limit = 8) => {
   const boostGenre = (t) => `${t} exitos de la historia`;
   const boostPlaylist = (t) => `${t} lo mas sonado`;
 
+  // Jingle de identidad de la radio: "Estás escuchando Neon Music" antes de arrancar
+  // una búsqueda/colección. En la APK (modo nativo) el audio lo gobierna el servicio,
+  // así que se omite aquí para no romper la cola nativa.
+  let jingleEl = null;
+  const playJingleThen = (cb) => {
+    if (nativeMode) { cb(); return; }
+    try {
+      jingleEl = new Audio('/station-id.mp3');
+      jingleEl.volume = (audio.volume || 0.8);
+      jingleEl.onended = () => { cb(); };
+      jingleEl.onerror = () => { cb(); };
+      jingleEl.play().catch(() => cb());
+    } catch (e) { cb(); }
+  };
+
+  // ¿Hay reproducción activa ahora? (para decidir si stagear o arrancar de inmediato)
+  const isPlayingNow = () => playIntent || nativePlaying || (!audio.paused && !!audio.src);
+  // Pasa el listado en espera a ser el listado activo de reproducción.
+  const commitPending = () => {
+    if (pending) {
+      results = pending.results;
+      searchMeta = pending.meta;
+      pending = null;
+      activeSrc = 'results';
+    }
+  };
+  // Arranca un listado nuevo: si ya suena algo, lo deja en espera (no corta la canción
+  // actual); si no, lo compromete y reproduce de inmediato.
+  const startOrStage = (list, meta, manual = false) => {
+    if (isPlayingNow()) {
+      pending = { results: list, meta };
+      renderResults();
+      statusText.textContent = `🔎 ${list.length} resultados listos · tu canción sigue sonando`;
+      showToast('🔎 Nueva búsqueda en espera (suena la actual)');
+      return;
+    }
+    results = list;
+    searchMeta = meta;
+    renderResults();
+    playJingleThen(() => playFrom(0, 'results', manual));
+  };
+
   // Regla 1 + 3: búsqueda tipo Lista de Reproducción. Si el backend la encuentra,
   // despliega la colección completa en cola (índice, miniatura, duración) y reproduce.
   const smartPlaylistSearch = async (q, raw) => {
@@ -2092,13 +2138,12 @@ const fuzzyCatalog = (query, limit = 8) => {
       if (data.error) throw new Error(data.error);
       if (data.type === 'playlist' && Array.isArray(data.results) && data.results.length) {
         feedCatalog(data.results);
-        results = data.results;
         const meta = data.playlist || {};
-        searchMeta = { kind: 'playlist', name: meta.name || data.name || raw, sub: `${results.length} canciones en la colección · "${raw}"`, img: meta.thumbnail || (results[0] ? results[0].thumbnail : '') };
-        renderResults();
-        statusText.textContent = `🎵 Colección inteligente · ${results.length} canciones para "${raw}"`;
+        const plMeta = { kind: 'playlist', name: meta.name || data.name || raw, sub: `${data.results.length} canciones en la colección · "${raw}"`, img: meta.thumbnail || (data.results[0] ? data.results[0].thumbnail : '') };
+        statusText.textContent = `🎵 Colección inteligente · ${data.results.length} canciones para "${raw}"`;
         autoDjSeed = { artist: '', query: raw }; // la radio continúa por género/época, no por un artista
-        playFrom(0, 'results', true);
+        // Si ya suena algo, deja la colección en espera; si no, arranca ya.
+        startOrStage(data.results, plMeta, true);
         showToast('▶ Colección inteligente cargada en la cola');
         return;
       }
@@ -2130,55 +2175,49 @@ const fuzzyCatalog = (query, limit = 8) => {
           ranked = data.results;
         }
       }
-      results = ranked;
-      // sembrar el Auto-DJ: por artista si es una canción, si no por la consulta (género/época)
-      const isGenre = smart || searchType !== 'track';
-      autoDjSeed = { artist: '', query: displayQ }; // la radio se guía por la consulta/género, no por un artista suelto
-      searchMeta = null;
-      const n = results.length;
+      // sembrar el Auto-DJ: por consulta (género/época), no por un artista suelto
+      autoDjSeed = { artist: '', query: displayQ };
+      const n = ranked.length;
+      let meta = null;
       if (n) {
         if (searchType === 'artist') {
-          searchMeta = { kind: 'artist', name: displayQ, sub: `${n} canciones de ${displayQ}`, img: results[0].thumbnail || '' };
+          meta = { kind: 'artist', name: displayQ, sub: `${n} canciones de ${displayQ}`, img: ranked[0].thumbnail || '' };
         } else if (searchType === 'album') {
-          searchMeta = { kind: 'album', album: displayQ, name: displayQ, sub: `${n} temas del álbum`, img: results[0].thumbnail || '' };
+          meta = { kind: 'album', album: displayQ, name: displayQ, sub: `${n} temas del álbum`, img: ranked[0].thumbnail || '' };
         } else if (smart) {
-          searchMeta = { kind: 'smart', name: results[0].title || displayQ, sub: `Lo más sonado · ${n} canciones para "${displayQ}"`, img: results[0].thumbnail || '' };
+          meta = { kind: 'smart', name: ranked[0].title || displayQ, sub: `Lo más sonado · ${n} canciones para "${displayQ}"`, img: ranked[0].thumbnail || '' };
         } else {
-          searchMeta = { kind: 'track', name: results[0].title || displayQ, sub: `${n} coincidencias en la canción`, img: results[0].thumbnail || '' };
+          meta = { kind: 'track', name: ranked[0].title || displayQ, sub: `${n} canciones · "${displayQ}"`, img: ranked[0].thumbnail || '' };
         }
-      }
-      renderResults();
-      if (n) {
         statusText.textContent = searchType === 'artist' ? `${n} canciones de "${displayQ}"`
           : searchType === 'album' ? `${n} temas del álbum "${displayQ}"`
           : smart ? `🔥 ${n} éxitos de "${displayQ}"`
           : `${n} canciones · "${displayQ}"`;
-        playFrom(0, 'results');
+        // Si ya suena algo, deja el listado en espera; si no, arranca ya.
+        startOrStage(ranked, meta);
         showToast(smart ? '▶ Reproduciendo los más sonados' : '▶ Reproduciendo la mejor coincidencia');
+        return;
       }
       // 2) Tolerancia ortográfica: si la API no reconoce el nombre,
       //    recuperamos del catálogo local las coincidencias aproximadas.
-      else {
-        let fb = [];
-        try {
-          fb = fuzzyCatalog(displayQ, 8);
-        } catch (fuzzyErr) {
-          fb = [];
-        }
-        if (fb.length) {
-          results = fb.map((r) => r.t);
-          const best = results[0];
-          searchMeta = { kind: 'track', name: best.title, sub: `${fb.length} coincidencia(s) aproximada(s) · ortografía corregida`, img: best.thumbnail || '' };
-          renderResults();
-          statusText.textContent = `≈ ${fb.length} coincidencia(s) aproximada(s) · "${displayQ}"`;
-          playFrom(0, 'results');
-          showToast(`🔎 ¿Quisiste decir «${best.title}»?`);
-        } else {
-          results = [];
-          statusText.textContent = 'sin resultados exactos ni aproximados';
-          panelResults.innerHTML = '<li class="hint">⚠ Sin resultados. Revisa la ortografía; la app ya tolera errores de 1 a 3 letras, espacios o acentos.</li>';
-        }
+      let fb = [];
+      try {
+        fb = fuzzyCatalog(displayQ, 8);
+      } catch (fuzzyErr) {
+        fb = [];
       }
+      if (fb.length) {
+        const fbList = fb.map((r) => r.t);
+        const best = fbList[0];
+        const fbMeta = { kind: 'track', name: best.title, sub: `${fb.length} coincidencia(s) aproximada(s) · ortografía corregida`, img: best.thumbnail || '' };
+        statusText.textContent = `≈ ${fb.length} coincidencia(s) aproximada(s) · "${displayQ}"`;
+        startOrStage(fbList, fbMeta);
+        showToast(`🔎 ¿Quisiste decir «${best.title}»?`);
+        return;
+      }
+      results = [];
+      statusText.textContent = 'sin resultados exactos ni aproximados';
+      panelResults.innerHTML = '<li class="hint">⚠ Sin resultados. Revisa la ortografía; la app ya tolera errores de 1 a 3 letras, espacios o acentos.</li>';
     } catch (e) {
       showToast(`Error al buscar: ${e.message}`, true);
       statusText.textContent = 'error de búsqueda';
@@ -2194,6 +2233,12 @@ const fuzzyCatalog = (query, limit = 8) => {
     const pl = url.match(/[?&]list=([\w-]{8,})/);
     if (pl) { doPlaylist(url); return; }
     const plan = smartPlan(q);
+    // Si parece un artista (dj, mc, grupo, banda, los/las/la/el…) y el usuario no
+    // eligió otro tipo, buscamos como artista para traer TODAS sus canciones.
+    if (searchType === 'track' && plan.type !== 'playlist') {
+      const qn = normTex(q);
+      if (/^(dj|mc|mr|dr|grupo|banda|orquesta|duo|dueto|los|las|la|el)\s+/i.test(qn)) searchType = 'artist';
+    }
     // Regla 1: época / pistas de "lo más sonado", o el usuario eligió "Lista" → búsqueda tipo playlist.
     if (searchType === 'playlist' || plan.type === 'playlist') {
       const pq = plan.type === 'genre' ? boostPlaylist(normTex(q)) : normTex(q);
@@ -2573,6 +2618,9 @@ const fuzzyCatalog = (query, limit = 8) => {
         audio.play().catch(() => {});
         return;
       }
+      // Al terminar la canción actual, si hay un listado en espera, arranca él
+      // (la nueva búsqueda que el usuario hizo mientras sonaba la anterior).
+      if (pending) { commitPending(); playFrom(0, 'results', true); return; }
       if (autonext.checked && queue().length) {
         const n = nextIndex();
         if (n >= 0) { play(n); return; }

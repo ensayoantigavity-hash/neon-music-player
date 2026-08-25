@@ -324,6 +324,10 @@ const isMusicVideo = (t) => {
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const stripTopic = (s) => String(s || '').replace(/\s*-\s*topic\s*$/i, '').replace(/\s*▶$/i, '').trim();
 const artistOf = (t) => stripTopic(t.byline || t.channel || '');
+const stripHonorific = (s) => String(s || '')
+  .replace(/^(dj|mc|mr|dr|la|los|las|el|grupo|banda|orquesta|duo|dueto|the)\s+/i, '')
+  .replace(/\s+(official|topic|vevo|musica|music|canal)$/i, '')
+  .trim();
 const isOfficial = (t) => t.channel ? /official|\- topic|\btopic$/i.test(t.channel) : false;
 
 const nameMatches = (titled, ql) => {
@@ -496,6 +500,9 @@ function expandDjQuery(raw) {
   for (const [num, word] of DECADE_PAIRS) {
     if (new RegExp('\\b' + num + '\\b|\\b' + word + '\\b').test(q)) decades.push(num);
   }
+  // "clasico"/"clasico" se asimila a las decadas 80/90/2000
+  const CLASICO_RE = /\bclasico\b|\bclásico\b/;
+  const clasico = CLASICO_RE.test(q);
   const base = genre || q;
   if (genre && DJ_GENRES[genre]) {
     DJ_GENRES[genre].forEach((s) => out.add(s));
@@ -511,12 +518,21 @@ function expandDjQuery(raw) {
       out.add(`${q} ${d}s hits`);
     }
   }
+  if (clasico) {
+    // un clasico abarca 80/90/2000: cubre esas epocas para no perder temas
+    for (const d of ['80', '90', '2000']) {
+      out.add(`${base} de los ${d}`);
+      out.add(`${base} de los ${d} exitos`);
+      out.add(`${base} ${d}s hits`);
+      out.add(`${base} clasicos ${d}s`);
+    }
+  }
   out.add(`${base} exitos`);
   out.add(`${base} clasicos`);
   out.add(`${base} lo mas sonado`);
   out.add(`${base} hits`);
   out.add(`${base} mix`);
-  return Array.from(out).slice(0, 12);
+  return Array.from(out).slice(0, 20);
 }
 
 app.get('/api/search', async (req, res) => {
@@ -530,13 +546,15 @@ app.get('/api/search', async (req, res) => {
     if (type === 'artist') {
       // TODAS las canciones del artista: filtra por nombre de artista (canal/byline/titulo)
       const seen = new Set();
+      const qln = norm(stripHonorific(ql));
       const raw = await ytSearchPages(q, 80, 3);
       const pool = [];
       for (const t of raw) {
         if (!isMusicVideo(t)) continue;
-        const art = artistOf(t);
-        const na = norm(art);
-        const ok = na === ql || na.includes(ql) || ql.includes(na) || norm(cleanTitle(t.title)).startsWith(`${ql} - `);
+        const na = norm(stripHonorific(artistOf(t)));
+        const tt = norm(cleanTitle(t.title));
+        const ok = na === qln || na.includes(qln) || qln.includes(na)
+          || tt.startsWith(`${qln} - `) || tt.startsWith(`${na} - `);
         if (!ok) continue;
         if (seen.has(t.id)) continue;
         seen.add(t.id);
@@ -581,9 +599,10 @@ app.get('/api/search', async (req, res) => {
       dj.sort((a, b) => (b.views || 0) - (a.views || 0));
       out = dj.slice(0, 100).map(toResult);
     } else {
-      // cancion: maximo 10 que coincidan con el nombre
+      // cancion: busca a fondo y devuelve las coincidencias EXACTAS primero,
+      // sin limitarse a 10; el cliente luego las rankea por similitud.
       const seen = new Set();
-      const raw = await ytSearchPages(q, 30, 1);
+      const raw = await ytSearchPages(q, 50, 2);
       const pool = [];
       for (const t of raw) {
         if (!isMusicVideo(t)) continue;
@@ -594,9 +613,11 @@ app.get('/api/search', async (req, res) => {
         pool.push(t);
       }
       pool.sort((a, b) => (b.views || 0) - (a.views || 0));
-      let exact = pool.filter((t) => nameMatches(t.title, ql));
-      if (!exact.length) exact = pool.filter((t) => norm(t.title).includes(ql) || norm(artistOf(t)).includes(ql));
-      out = (exact.length ? exact : pool).slice(0, 10).map(toResult);
+      const exact = pool.filter((t) => nameMatches(t.title, ql));
+      const ranked = exact.length
+        ? exact.concat(pool.filter((t) => !exact.includes(t)))
+        : pool;
+      out = ranked.slice(0, 25).map(toResult);
     }
 
     // arranque super rapido: pre-resolver el stream del primer resultado mientras se
