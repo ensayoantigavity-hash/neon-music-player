@@ -2,8 +2,7 @@
   "name": "neon-music-radio",
   "type": "module",
   "scripts": {
-    "start": "node serve.js",
-    "postinstall": "npx youtube-dl-exec --download-only"
+    "start": "node serve.js"
   },
   "dependencies": {
     "express": "^4.21.0",
