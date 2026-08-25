@@ -289,39 +289,19 @@ let listeners = [];
 // Telemetria del Auto-DJ (diagnostico remoto via /api/radiostatus)
 const radioStats = { arranques: 0, salidas: 0, ultimoError: '', bytesEnviados: 0 };
 let lastAudioAt = 0;      // ultima vez que fluyo audio real (googlevideo)
-let gapProc = null;       // ffmpeg rellenando cortina durante huecos
-const STATION_MP3 = path.join(__dirname, 'public', 'station-id.mp3');
 
-// Anti-silencio: si no hay audio real >5s y hay oyentes, transmite la cortina en bucle
-// hasta que vuelvan los bytes reales. El oyente NUNCA queda mudo.
+// Vigia de 1s: caduca al DJ sin audio real y dispara el CLON del master.
+// (la cortina "Estas escuchando Neon Music" fue retirada a peticion del dueno)
 setInterval(() => {
     // DJ activo SOLO si su audio fluye de verdad (chunk reciente); si no, cede la radio
     const djVivo = djConnected && (Date.now() - lastDjChunkAt < 5000);
     if (djConnected && !djVivo) {
-        console.log('[neon] DJ sin audio real (>5s): cede a cortina/Auto-DJ');
+        console.log('[neon] DJ sin audio real (>5s): cede al clon/Auto-DJ');
         djConnected = false;
         currentDJSocket = null;
         endDjTrans();
     }
-    // 1) CLON DEL MASTER: misma cancion para los oyentes (prioridad maxima)
     iniciarClonDeMaster();
-
-    const silencio = Date.now() - lastAudioAt > 5000;
-    if (!silencio || djVivo || clonando || gapProc) {
-        if (gapProc && (!silencio || djVivo || clonando)) { try { gapProc.kill(); } catch {} gapProc = null; }
-        return;
-    }
-    if (!existsSync(STATION_MP3)) return;
-    try {
-        gapProc = spawn('ffmpeg', ['-re', '-stream_loop', '-1', '-i', STATION_MP3,
-            '-c:a', 'libmp3lame', '-b:a', '96k', '-f', 'mp3', 'pipe:1'],
-            { stdio: ['ignore', 'pipe', 'pipe'] });
-        gapProc.stdout.on('data', chunk => {
-            for (const l of listeners) { try { l.write(chunk); } catch {} }
-        });
-        gapProc.on('error', () => { gapProc = null; });
-        gapProc.on('close', () => { gapProc = null; });
-    } catch { gapProc = null; }
 }, 1000);
 
 app.get('/radio/stream', (req, res) => {
@@ -510,7 +490,6 @@ io.on('connection', (socket) => {
         djConnected = true;
         currentDJSocket = socket.id;
         stopAutoDJ();
-        if (gapProc) { try { gapProc.kill(); } catch {} gapProc = null; } // cortina fuera: entra el DJ
         startDjTrans();
         console.log("DJ Principal conectado y transmitiendo en vivo.");
     });
