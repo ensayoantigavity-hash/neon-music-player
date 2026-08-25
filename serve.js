@@ -282,6 +282,7 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 let djConnected = false;
 let currentDJSocket = null;
+let lastDjChunkAt = 0; // latido REAL de audio del DJ (no solo conexion)
 let autoDJProcess = null;
 let listeners = [];
 
@@ -294,10 +295,17 @@ const STATION_MP3 = path.join(__dirname, 'public', 'station-id.mp3');
 // Anti-silencio: si no hay audio real >5s y hay oyentes, transmite la cortina en bucle
 // hasta que vuelvan los bytes reales. El oyente NUNCA queda mudo.
 setInterval(() => {
+    // DJ activo SOLO si su audio fluye de verdad (chunk reciente); si no, cede la radio
+    const djVivo = djConnected && (Date.now() - lastDjChunkAt < 5000);
+    if (djConnected && !djVivo) {
+        console.log('[neon] DJ sin audio real (>5s): cede a cortina/Auto-DJ');
+        djConnected = false;
+        currentDJSocket = null;
+        endDjTrans();
+    }
     const silencio = Date.now() - lastAudioAt > 5000;
-    if (!silencio || djConnected || gapProc) {
-        // hay audio real o DJ o ya esta rellenando -> apagar el relleno si sobra
-        if (gapProc && (!silencio || djConnected)) { try { gapProc.kill(); } catch {} gapProc = null; }
+    if (!silencio || djVivo || gapProc) {
+        if (gapProc && (!silencio || djVivo)) { try { gapProc.kill(); } catch {} gapProc = null; }
         return;
     }
     if (!existsSync(STATION_MP3)) return;
@@ -458,6 +466,7 @@ io.on('connection', (socket) => {
     socket.on('stream-desde-dj', (audioChunk) => {
         if (socket.id !== currentDJSocket) return;
         lastAudioAt = Date.now();
+        lastDjChunkAt = Date.now();
         if (djTrans && djTrans.stdin.writable) { try { djTrans.stdin.write(Buffer.from(audioChunk)); } catch {} }
     });
     socket.on('disconnect', () => {
@@ -498,6 +507,7 @@ app.get('/api/radiostatus', (req, res) => {
   }
   res.json({
     djConnected,
+    djVivo: djConnected && (Date.now() - lastDjChunkAt < 5000),
     autoDjActivo: !!autoDJProcess,
     oyentes: listeners.length,
     binarioYtdlp: existsSync(LOCAL_BIN) ? LOCAL_BIN : 'no descargado',
