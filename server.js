@@ -149,25 +149,21 @@ function getPlayableStream(videoId) {
   if (inflight.has(videoId)) return inflight.get(videoId);
   const p = (async () => {
     let lastErr;
-    for (let attempt = 0; attempt < 4; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         if (attempt > 0) streamCache.delete(videoId);
-        // Cada intento prueba un orden distinto de clientes para maximizar éxito
-        let clients;
-        if (attempt === 0) clients = CLIENT_CHAIN;
-        else if (attempt === 1) clients = [...CLIENT_CHAIN].reverse();
-        else if (attempt === 2) clients = ['tv','android'];
-        else clients = ['web','web_embedded'];
+        let clients = attempt === 0 ? CLIENT_CHAIN : ['tv','android','ios'];
         const url = await resolveStream(videoId, { clients, force: attempt > 0 });
-        if (!(await probeStream(url))) throw new Error('stream inaccesible');
-        return url;
+        // Sin probe para velocidad: la URL directa de googlevideo es válida si yt-dlp la dio
+        if (url && url.startsWith('http')) return url;
+        throw new Error('stream vacío');
       } catch (e) {
         lastErr = e;
-        if (attempt < 3) await new Promise((r) => setTimeout(r, 300 + attempt * 400));
+        if (attempt < 1) await new Promise((r) => setTimeout(r, 400));
       }
     }
     failedIds.set(videoId, Date.now());
-    throw new Error('No se puede reproducir este video (restringido, bloqueado por region o protegido)');
+    throw lastErr || new Error('No se puede reproducir este video');
   })();
   p.finally(() => inflight.delete(videoId)).catch(() => {});
   inflight.set(videoId, p);
@@ -630,7 +626,7 @@ app.get('/api/search', async (req, res) => {
         if (r.status !== 'fulfilled') continue;
         for (const t of r.value) {
           if (!isMusicVideo(t)) continue;
-          if (seen.has(t.id)) continue;
+          if (seen.has(t.id) || failedIds.has(t.id)) continue;
           seen.set(t.id, t);
         }
       }
@@ -644,7 +640,7 @@ app.get('/api/search', async (req, res) => {
           const fbSeen = new Set(out.map(x=>x.id));
           const fbPool = [];
           for (const t of fbRaw) {
-            if (!isMusicVideo(t)) continue;
+            if (!isMusicVideo(t) || failedIds.has(t.id)) continue;
             if (fbSeen.has(t.id) || seen.has(t.id)) continue;
             fbSeen.add(t.id);
             t.title = cleanTitle(t.title);
@@ -663,7 +659,7 @@ app.get('/api/search', async (req, res) => {
           for (const line of lines) {
             try {
               const j = JSON.parse(line);
-              if (!j.id || seen.has(j.id)) continue;
+              if (!j.id || seen.has(j.id) || failedIds.has(j.id)) continue;
               // Fallback permisivo: solo filtra duración 30-3600, no NON_MUSIC_RE estricto
               const t = { id: j.id, title: cleanTitle(j.title||''), channel: stripTopic(j.channel||j.uploader||''), duration: Number(j.duration)||0, views: Number(j.view_count)||0, thumbnail: `https://i.ytimg.com/vi/${j.id}/hq720.jpg` };
               if (!t.duration || t.duration < 30 || t.duration > 3600) continue;
@@ -681,7 +677,7 @@ app.get('/api/search', async (req, res) => {
       const raw = await ytSearchPages(q, 50, 2 + (Math.random() < 0.5 ? 0 : 1));
       const pool = [];
       for (const t of raw) {
-        if (!isMusicVideo(t)) continue;
+        if (!isMusicVideo(t) || failedIds.has(t.id)) continue;
         if (seen.has(t.id)) continue;
         seen.add(t.id);
         t.title = cleanTitle(t.title);
