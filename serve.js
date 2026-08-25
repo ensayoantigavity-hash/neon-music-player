@@ -303,9 +303,12 @@ setInterval(() => {
         currentDJSocket = null;
         endDjTrans();
     }
+    // 1) CLON DEL MASTER: misma cancion para los oyentes (prioridad maxima)
+    iniciarClonDeMaster();
+
     const silencio = Date.now() - lastAudioAt > 5000;
-    if (!silencio || djVivo || gapProc) {
-        if (gapProc && (!silencio || djVivo)) { try { gapProc.kill(); } catch {} gapProc = null; }
+    if (!silencio || djVivo || clonando || gapProc) {
+        if (gapProc && (!silencio || djVivo || clonando)) { try { gapProc.kill(); } catch {} gapProc = null; }
         return;
     }
     if (!existsSync(STATION_MP3)) return;
@@ -355,6 +358,53 @@ const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Transmite UN video a los oyentes reutilizando el camino probado de /api/stream:
 // resuelve la URL firmada de googlevideo y la pipa desde Node (sin bot-check extra)
+// ---- CLON DEL MASTER (idea estrella): el server reproduce LA MISMA cancion
+// que suena en / hacia todos los oyentes, sin depender del navegador del DJ.
+// pushStation reporta el id cada 4s; aqui lo detectamos y pipamos su stream. ----
+let clonando = false;
+let cloneAbortCtrl = null;
+let ultimoClonadoId = '';
+
+async function iniciarClonDeMaster() {
+    const np = nowPlaying;
+    const fresco = np.id && np.ts && (Date.now() - np.ts < NOWPLAYING_TTL + 3000) && np.playing !== false;
+    if (djConnected || clonando || !fresco || np.id === ultimoClonadoId) return;
+    const id = np.id;
+    ultimoClonadoId = id;
+    clonando = true;
+    cloneAbortCtrl = new AbortController();
+    console.log('[neon] Clon de master: transmitiendo ' + id + ' a los oyentes');
+    try {
+        const gurl = await getPlayableStream(id); // comparte la resolucion con el propio master
+        const upstream = await fetch(gurl, { redirect: 'follow', signal: cloneAbortCtrl.signal });
+        if (!upstream.ok || !upstream.body) throw new Error('upstream HTTP ' + upstream.status);
+        const reader = upstream.body.getReader();
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            // sigue solo mientras siga siendo la cancion vigente y sin DJ en vivo
+            const npNow = nowPlaying;
+            const sigue = npNow.id === id && npNow.ts && (Date.now() - npNow.ts < NOWPLAYING_TTL + 5000) && npNow.playing !== false;
+            if (djConnected || !clonando || !sigue) { try { reader.cancel(); } catch {} break; }
+            lastAudioAt = Date.now();
+            radioStats.bytesEnviados += value.length;
+            const buf = Buffer.from(value);
+            for (const listener of listeners) { try { listener.write(buf); } catch {} }
+        }
+    } catch (e) {
+        radioStats.ultimoError = 'clon: ' + String(e.message || e).slice(0, 150);
+    } finally {
+        if (cloneAbortCtrl) try { cloneAbortCtrl.abort(); } catch {}
+        cloneAbortCtrl = null;
+        clonando = false;
+    }
+}
+function detenerClon() {
+    if (!clonando) return;
+    clonando = false;
+    if (cloneAbortCtrl) try { cloneAbortCtrl.abort(); } catch {}
+}
+
 async function streamOneToListeners(id) {
     try {
         const gurl = await getPlayableStream(id);
@@ -377,8 +427,9 @@ async function streamOneToListeners(id) {
 }
 
 // Bucle DJ: llena lista de IDs (filtra lives) -> transmite cada video uno tras otro
+// Se pausa solo si hay DJ en vivo O si el clon del master esta transmitiendo.
 async function autoDjLoop() {
-    while (!djConnected) {
+    while (!djConnected && !clonando) {
         let ids = [];
         // Prioridad: lo ultimo buscado en la app (station) -> asi la radio sigue el gusto actual
         const stationSeed = (nowPlaying.station || '').trim();
@@ -407,6 +458,15 @@ async function autoDjLoop() {
             } catch (e) {
                 radioStats.ultimoError = 'busqueda: ' + e.message;
             }
+        }
+        if (djConnected || clonando) return;
+        for (const id of ids) {
+            if (djConnected || clonando) return;
+            await streamOneToListeners(id);
+            await sleepMs(350); // micro-pausa entre temas
+        }
+        if (!djConnected && !clonando) await sleepMs(4000); // nueva semilla al agotar la lista
+    }
         }
         if (djConnected) return;
         for (const id of ids) {
@@ -508,6 +568,8 @@ app.get('/api/radiostatus', (req, res) => {
   res.json({
     djConnected,
     djVivo: djConnected && (Date.now() - lastDjChunkAt < 5000),
+    clonando,
+    clonandoId: ultimoClonadoId,
     autoDjActivo: !!autoDJProcess,
     oyentes: listeners.length,
     binarioYtdlp: existsSync(LOCAL_BIN) ? LOCAL_BIN : 'no descargado',
