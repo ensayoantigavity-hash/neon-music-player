@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: neon-music-player
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/ping
+    envVars:
+      - key: PORT
+        value: 8765
+      - key: YTDLP_CLIENTS
+        value: android,tv,ios,web_embedded
+      - key: NODE_ENV
+        value: production
