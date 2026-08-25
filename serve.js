@@ -58,10 +58,11 @@ const failedIds = new Map();   // id -> timestamp (bloqueados temporalmente)
 // 1) binario ya descargado  2) yt-dlp global  3) python -m yt_dlp
 // 4) descarga del binario standalone oficial de GitHub (una vez por deploy)
 function canRun(cmd, args) {
-  try {
-    const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
-    return !r.error;
-  } catch { return false; }
+    try {
+        const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 15000 });
+        // Debe existir Y ejecutarse con exito: python existe pero sin modulo yt_dlp sale codigo 1
+        return !r.error && r.status === 0;
+    } catch { return false; }
 }
 async function ensureYtdlp() {
   const LOCAL_BIN = path.join(__dirname, 'bin', 'yt-dlp');
