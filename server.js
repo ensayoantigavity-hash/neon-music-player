@@ -193,7 +193,7 @@ app.get('/api/config', (req, res) => {
 
 // ---- "Solo reproductor" (modo escucha): el DJ (app completa) avisa qué tema suena,
 // y los amigos lo escuchan en /escuchar sin buscar ni adelantar/retroceder. ----
-let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '' };
+let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '' }; // estado de la "solo reproductor" (se reinicia con cada deploy)
 app.post('/api/nowplaying', express.json(), (req, res) => {
   const b = req.body || {};
   if (typeof b.id === 'string' && /^[\w-]{11}$/.test(b.id)) {
