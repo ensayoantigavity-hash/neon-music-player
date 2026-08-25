@@ -135,8 +135,8 @@
   // Avisa al servidor qué tema suena ahora (alimenta el "solo reproductor" de los amigos)
   const pushStation = () => {
     try {
-      if (!(audio.__isShim && audio.mode === 'yt')) return;
-      const t = (!playingFile && current >= 0) ? listOf(activeSrc)[current] : null;
+      if (playingFile) return;
+      const t = (current >= 0) ? listOf(activeSrc)[current] : null;
       if (!t || !t.id) return;
       fetch('/api/nowplaying', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1064,10 +1064,12 @@ updatePlaylistCount();
       updateAmbient(track);
       return;
     }
-    // ---- Reproducción cliente vía YouTube IFrame (sin streaming del servidor) ----
-    // Si ya detectamos un bloqueo de embebido, usamos el stream del servidor para TODO
-    // (evita el letrero "bloqueado por YouTube" y garantiza que suene cada canción).
-    if (!playingFile && !nativeMode && !useStream) {
+    // ---- Reproducción cliente vía stream del servidor (sin embebido de YouTube) ----
+    // Siempre usamos el stream directo del servidor: el play() queda en el mismo
+    // gesto del usuario (síncrono), así el navegador nunca bloquea el autoplay y
+    // YouTube no puede restringir la inserción. El "solo reproductor" se alimenta
+    // con pushStation() más abajo.
+    if (false && !playingFile && !nativeMode && !useStream) {
       const ytId = (track && track.id) || '';
       if (!ytId) return;
       audio.src = 'yt:' + ytId;
@@ -1142,6 +1144,7 @@ updatePlaylistCount();
     setPlaying({ playing: true, track });
     playIntent = true;
     pushMedia(track);
+    pushStation();
     updateMss(true);
     liveBadge.classList.toggle('hidden', true);
     durBadge.textContent = track.duration ? fmt(track.duration) : '';
