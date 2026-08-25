@@ -1,5 +1,5 @@
 {
-  "name": "reproductor-musica",
+  "name": "neon-music-radio",
   "version": "1.0.0",
   "description": "Reproductor de audio autonomo: busca musica en la web y la reproduce sin anuncios",
   "type": "module",
