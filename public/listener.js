@@ -149,6 +149,7 @@
   let localGenre = 'pop';
   let localCount = 0;
   let playingJingle = false;
+  const blockedIds = new Set(); // videos bloqueados por YouTube (no se repiten)
   const GENRES = ['pop', 'rock', 'reggaeton', 'musica latina', 'clasicos de los 80', 'exitos 2024'];
   const JINGLE = '/station-id.mp3'; // cortina "Estás escuchando Neon Music" entre temas
 
@@ -162,7 +163,15 @@
     if (playingJingle) { playingJingle = false; playLocalNext(); }
     else { playJingle(); }
   });
-  audio.addEventListener('error', () => { if (currentSource === 'master') statusEl.textContent = 'Este tema está bloqueado por YouTube; esperando el siguiente…'; });
+  audio.addEventListener('error', () => {
+    if (currentSource === 'local') {
+      if (currentYtId && currentYtId !== JINGLE) blockedIds.add(currentYtId);
+      statusEl.textContent = 'Bloqueado por YouTube · saltando al siguiente…';
+      playLocalNext();
+    } else if (currentSource === 'master') {
+      statusEl.textContent = 'Este tema está bloqueado por YouTube en tu región; sigue al DJ…';
+    }
+  });
 
   const setTrack = (id, info) => {
     currentYtId = id;
@@ -213,6 +222,7 @@
     }
     const t = localQueue.shift();
     if (!t || !t.id) return;
+    if (blockedIds.has(t.id)) return playLocalNext();
     elStation.textContent = 'NEON MUSIC · RADIO';
     setTrack(t.id, t);
     statusEl.textContent = '';
