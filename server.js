@@ -181,6 +181,16 @@ app.get('/api/ping', (req, res) => {
   });
 });
 
+// expone la configuración de despliegue (Cloud Run fija K_SERVICE automáticamente)
+app.get('/api/config', (req, res) => {
+  res.json({
+    cloudRun: !!process.env.K_SERVICE,
+    streamMode: process.env.STREAM_MODE || 'proxy',
+    clients: CLIENT_CHAIN.join(', '),
+    ffmpeg: !!FFMPEG,
+  });
+});
+
 // ---- proxy de imágenes (mismo origen para leer el color vía <canvas>) ----
 app.get('/api/img', async (req, res) => {
   const u = String(req.query.u || '');
@@ -993,7 +1003,7 @@ app.get('/api/lyrics', async (req, res) => {
 
 app.use('/dl', express.static(DOWNLOAD_DIR, { dotfiles: 'deny' }));
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  ▤ Reproductor activo  →  http://localhost:${PORT}`);
   // URLs compartibles con amigos (misma red/WiFi): lista todas las IP locales
   try {
