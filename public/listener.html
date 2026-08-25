@@ -1,102 +1,38 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>NEON MUSIC · Radio</title>
-    <style>
-        :root { --neon: #19e3ff; --neon2: #ff2bd6; }
-        * { box-sizing: border-box; }
-        html, body { margin: 0; height: 100%; }
-        body {
-            background: radial-gradient(1200px 800px at 50% -10%, #16213a 0%, #0e1525 50%, #05070f 100%);
-            color: #eaf2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            min-height: 100vh; padding: 20px; text-align: center; overflow: hidden;
-        }
-        .card {
-            width: min(520px, 92vw); padding: 28px 27px; border-radius: 20px;
-            background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.75);
-            box-shadow: 0 40px 80px rgba(25,227,255,0.12), inset 0 1px 0px rgba(255,255,255,0.05);
-            backdrop-filter: blur(10px);
-        }
-        .logo { font-size: 24px; font-weight: 800; letter-spacing: 1px; margin-bottom: 4px;
-            background: linear-gradient(90deg, var(--neon), var(--neon2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-        .station { font-size: 13px; color: #a4b6d4; text-transform: uppercase; letter-spacing: 2px; margin: 10px 0 15px; display: flex; align-items: center; justify-content: center; gap: 8px; }
-        .dot { width: 9px; height: 9px; border-radius: 50%; background: #44546a; box-shadow: 0 0 8px rgba(0,0,0,0.4); }
-        .dot.on { background: #25d366; box-shadow: 0 0 10px rgba(37,224,138,0.8); }
-        .dot.off { background: #ff4d4d; box-shadow: 0 0 10px rgba(255,77,77,0.8); }
-        .vinyl {
-            width: 190px; height: 190px; border-radius: 50%; margin: 0 auto 16px;
-            background: #011322; box-shadow: 0 0 36px rgba(25,227,255,0.20);
-            display: flex; align-items: center; justify-content: center; overflow: hidden;
-        }
-        .btn {
-            background: linear-gradient(135deg, var(--neon), var(--neon2));
-            border: none; color: #fff; padding: 14px 40px; font-size: 16px; font-weight: 700;
-            border-radius: 50px; cursor: pointer; transition: all 0.3s ease; width: 100%;
-        }
-        .status { font-size: 13px; color: #a4b6d4; margin-top: 12px; height: 18px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <div class="logo">NEON MUSIC</div>
-        <div class="station"><span id="dot" class="dot off"></span> En Vivo</div>
-        <div class="vinyl">
-            <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--neon)"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>
-        </div>
-        <button id="playBtn" class="btn">▶ REPRODUCIR RADIO</button>
-        <div id="status" class="status">Estación sintonizada</div>
-    </div>
-    <audio id="audio" crossorigin="anonymous"></audio>
+<audio id="audio" crossorigin="anonymous" preload="none"></audio>
+<script>
+const audioEl=document.getElementById('audio');
+const playBtn=document.getElementById('playBtn');
+const statusEl=document.getElementById('status');
+const dotEl=document.getElementById('dot');
+let stallTimer=null, isPlaying=false;
 
-    <script>
-        const audioEl = document.getElementById('audio');
-        const playBtn = document.getElementById('playBtn');
-        const statusEl = document.getElementById('status');
-        const dotEl = document.getElementById('dot');
-        let isPlaying = false;
-        let stallTimer = null;
-
-        playBtn.addEventListener('click', () => {
-            if (!isPlaying) {
-                statusEl.textContent = 'Conectando al stream...';
-                audioEl.src = '/radio/stream';
-                audioEl.play()
-                    .then(() => {
-                        isPlaying = true;
-                        playBtn.textContent = '⏸ PAUSAR RADIO';
-                        statusEl.textContent = 'Transmitiendo en vivo';
-                        dotEl.className = 'dot on';
-                    })
-                    .catch(() => {
-                        statusEl.textContent = 'Error de conexión. Reintentando...';
-                        scheduleReconnect();
-                    });
-            } else {
-                audioEl.pause();
-                isPlaying = false;
-                playBtn.textContent = '▶ REPRODUCIR RADIO';
-                statusEl.textContent = 'Radio pausada';
-                dotEl.className = 'dot off';
-                clearTimeout(stallTimer);
-            }
-        });
-
-        function scheduleReconnect() {
-            clearTimeout(stallTimer);
-            stallTimer = setTimeout(() => {
-                statusEl.textContent = 'Reconectando señal...';
-                audioEl.load();
-                audioEl.play().catch(() => {});
-            }, 3000);
-        }
-
-        audioEl.addEventListener('stalled', scheduleReconnect);
-        audioEl.addEventListener('waiting', scheduleReconnect);
-        audioEl.addEventListener('error', scheduleReconnect);
-        audioEl.addEventListener('playing', () => { clearTimeout(stallTimer); statusEl.textContent = 'Transmitiendo en vivo'; dotEl.className = 'dot on'; });
-    </script>
-</body>
-</html>
+function playStream(){
+  audioEl.src='/radio/stream?_t='+Date.now();
+  audioEl.load();
+  audioEl.play().then(()=>{
+    isPlaying=true; playBtn.textContent='⏸ PAUSAR RADIO';
+    dotEl.className='dot on'; statusEl.textContent='Transmitiendo en vivo';
+  }).catch(()=>{
+    statusEl.textContent='Toca ▶ para sintonizar';
+    scheduleReconnect();
+  });
+}
+function scheduleReconnect(){
+  clearTimeout(stallTimer);
+  stallTimer=setTimeout(()=>{
+    statusEl.textContent='Reconectando señal...';
+    // fuerza nueva petición para salir del 404 cacheado
+    try{audioEl.pause()}catch{}
+    audioEl.removeAttribute('src'); audioEl.load();
+    setTimeout(playStream,300);
+  },3000);
+}
+playBtn.addEventListener('click',()=>{
+  if(isPlaying){ try{audioEl.pause()}catch{}; isPlaying=false; playBtn.textContent='▶ REPRODUCIR RADIO'; dotEl.className='dot off'; statusEl.textContent='Radio pausada'; clearTimeout(stallTimer); }
+  else playStream();
+});
+audioEl.addEventListener('stalled',scheduleReconnect);
+audioEl.addEventListener('waiting',scheduleReconnect);
+audioEl.addEventListener('error',scheduleReconnect);
+audioEl.addEventListener('playing',()=>{ clearTimeout(stallTimer); dotEl.className='dot on'; statusEl.textContent='Transmitiendo en vivo'; });
+</script>
