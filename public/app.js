@@ -2761,9 +2761,8 @@ const fuzzyCatalog = (query, limit = 8) => {
     dbg(`✖ error ${errCode} · ${track ? track.id : 'archivo'}`);
     try { const n = native(); if (n && n.log) n.log(`audio error ${errCode} · ${track ? track.id : 'archivo'}`); } catch (ignored) { }
     stopAgc();
-    setPlaying({ playing: false });
-    pushPlaying(false);
-    updateMss(false);
+    // No ponemos en pausa aquí: mantenemos "cargando" mientras se reintenta modo/stream/iframe
+    statusText.textContent = 'cargando stream…';
     if (track && !retried.has(track.id)) {
       // agotar los modos en orden (en APK: raw primero) antes de rendirse
       const nm = nextMode();

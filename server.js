@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = parseInt(process.env.PORT || '8765', 10);
 const YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
-const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios')
+const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web,web_embedded,mweb')
   .split(',').map(s => s.trim()).filter(Boolean);
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || path.join(__dirname, 'Descargas');
 mkdirSync(DOWNLOAD_DIR, { recursive: true });
@@ -111,7 +111,7 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
     // y baja android/mweb al inicio (clientes de menor huella de "bot"). El orden se
     // rota en cada resolución para no repetir la misma combinación contra YouTube.
     order.sort(() => Math.random() - 0.5);
-    const preferred = ['tv', 'android', 'ios'];
+    const preferred = ['tv', 'android', 'ios', 'web', 'web_embedded', 'mweb'];
     order.sort((a, b) => (preferred.indexOf(b) - preferred.indexOf(a)) || (Math.random() - 0.5));
   }
 
@@ -149,16 +149,21 @@ function getPlayableStream(videoId) {
   if (inflight.has(videoId)) return inflight.get(videoId);
   const p = (async () => {
     let lastErr;
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         if (attempt > 0) streamCache.delete(videoId);
-        const clients = attempt === 0 ? CLIENT_CHAIN : [...CLIENT_CHAIN].reverse();
+        // Cada intento prueba un orden distinto de clientes para maximizar éxito
+        let clients;
+        if (attempt === 0) clients = CLIENT_CHAIN;
+        else if (attempt === 1) clients = [...CLIENT_CHAIN].reverse();
+        else if (attempt === 2) clients = ['tv','android'];
+        else clients = ['web','web_embedded'];
         const url = await resolveStream(videoId, { clients, force: attempt > 0 });
         if (!(await probeStream(url))) throw new Error('stream inaccesible');
         return url;
       } catch (e) {
         lastErr = e;
-        if (attempt < 2) await new Promise((r) => setTimeout(r, 300 + attempt * 400));
+        if (attempt < 3) await new Promise((r) => setTimeout(r, 300 + attempt * 400));
       }
     }
     failedIds.set(videoId, Date.now());
@@ -326,10 +331,11 @@ async function ytSearchPages(query, maxItems = 60, maxPages = 3) {
 // entrevistas, noticias, podcasts, streams, sermones, info, etc. El buscador solo
 // debe devolver canciones (videos musicales).
 const NON_MUSIC_RE = /(full movie|pel[ií]cula|movie|trailer|teaser|tr[áa]iler|documental|documentary|serie|episodio|episode|cap[ií]tulo|chapter|temporada|season|netflix|gameplay|walkthrough|videojuego|entrevista|interview|noticia|news|informe|reportaje|biograf[ií]a|biography|historia de|curiosidades|an[áa]lisis|review|resumen|teor[ií]a|explicaci[ióó]n|debate|charla|conferencia|conference|podcast|audiobook|vlog|blog|reacci[óo]n|reaction|tutorial|c[óo]mo hacer|how to|detr[áa]s de escena|behind the scenes|making of|lo que no sab[ií]as|lo que pas[óo]|serm[óo]n|predicaci[ióó]n|pastor|homil[ií]a|oraci[óo]n|iglesia|doblaje|\bstream\b|streaming|transmisi[óo]n|en directo|twitch|concierto)/i;
-const isMusicVideo = (t) => {
+const isMusicVideo = (t, maxDur = 900) => {
   if (!t || !t.duration) return false;
   // fuera de rango: muy corto (intro/spam) o muy largo (película/documental/stream)
-  if (t.duration < 40 || t.duration > 900) return false;
+  // Para mixes/colecciones (playlist) permitimos hasta 2h (7200s) porque son recopilaciones
+  if (t.duration < 40 || t.duration > maxDur) return false;
   if (NON_MUSIC_RE.test(t.title || '')) return false;
   return true;
 };
@@ -621,7 +627,7 @@ app.get('/api/search', async (req, res) => {
       for (const r of rawSets) {
         if (r.status !== 'fulfilled') continue;
         for (const t of r.value) {
-          if (!isMusicVideo(t)) continue;
+          if (!isMusicVideo(t, 7200)) continue;
           if (seen.has(t.id)) continue;
           seen.set(t.id, t);
         }
