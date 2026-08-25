@@ -312,14 +312,33 @@ async function ytSearchPages(query, maxItems = 60, maxPages = 3) {
   return items;
 }
 
-// TODO LO QUE NO ES MUSICA se filtra: peliculas, trailers, series, documentales, etc.
-const NON_MUSIC_RE = /(full movie|pel[ií]cula|movie teaser|movie trailer|game trailer|trailer|documental|documentary|episodio|ep\.?\s*[0-9]|episode|netflix|temporada|season [0-9]|gameplay|walkthrough|entrevista|interview|tutorial|podcast|audiobook|pastor|predicaci|conference|concierto|discurso|doblaje|serie|saga)/i;
+// TODO LO QUE NO ES MUSICA se filtra: peliculas, trailers, series, documentales,
+// entrevistas, noticias, podcasts, streams, sermones, info, etc. El buscador solo
+// debe devolver canciones (videos musicales).
+const NON_MUSIC_RE = /(full movie|pel[ií]cula|movie|trailer|teaser|tr[áa]iler|documental|documentary|serie|episodio|episode|cap[ií]tulo|chapter|temporada|season|netflix|gameplay|walkthrough|videojuego|entrevista|interview|noticia|news|informe|reportaje|biograf[ií]a|biography|historia de|curiosidades|an[áa]lisis|review|resumen|teor[ií]a|explicaci[ióó]n|debate|charla|conferencia|conference|podcast|audiobook|vlog|blog|reacci[óo]n|reaction|tutorial|c[óo]mo hacer|how to|detr[áa]s de escena|behind the scenes|making of|lo que no sab[ií]as|lo que pas[óo]|serm[óo]n|predicaci[ióó]n|pastor|homil[ií]a|oraci[óo]n|iglesia|doblaje|\bstream\b|streaming|transmisi[óo]n|en directo|twitch|concierto)/i;
 const isMusicVideo = (t) => {
   if (!t || !t.duration) return false;
-  if (t.duration < 40 || t.duration > 1500) return false;
-  if (NON_MUSIC_RE.test(t.title)) return false;
+  // fuera de rango: muy corto (intro/spam) o muy largo (película/documental/stream)
+  if (t.duration < 40 || t.duration > 900) return false;
+  if (NON_MUSIC_RE.test(t.title || '')) return false;
   return true;
 };
+
+// Variación: cada lanzamiento de la misma búsqueda debe dar resultados distintos
+// (como un DJ), sin perder el sentido de la palabra. Barajamos y mezclamos
+// popularidad con aleatoriedad para que el orden y el subconjunto cambien.
+const shuffle = (a) => {
+  a = a.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+};
+const jitterSort = (a) => a.sort((x, y) =>
+  (Math.log((x.views || 0) + 1) * (0.55 + Math.random() * 0.9)) -
+  (Math.log((y.views || 0) + 1) * (0.55 + Math.random() * 0.9))
+);
 
 const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim();
 const stripTopic = (s) => String(s || '').replace(/\s*-\s*topic\s*$/i, '').replace(/\s*▶$/i, '').trim();
@@ -356,9 +375,9 @@ const toResult = (t) => ({
 // infinita de temas relacionados por género/estilo/época/clásicos. Reutiliza
 // la expansión DJ (expandDjQuery) y, si hay artista, suma su catálogo. ----
 async function djCollect(seed) {
-  const variants = expandDjQuery(seed);
+  const variants = shuffle(expandDjQuery(seed));
   const seen = new Map();
-  const rawSets = await Promise.allSettled(variants.slice(0, 7).map((v) => ytSearchPages(v, 24, 2)));
+  const rawSets = await Promise.allSettled(variants.slice(0, 5 + Math.floor(Math.random() * 3)).map((v) => ytSearchPages(v, 24, 2 + (Math.random() < 0.5 ? 0 : 1))));
   for (const r of rawSets) {
     if (r.status !== 'fulfilled') continue;
     for (const t of r.value) {
@@ -368,7 +387,7 @@ async function djCollect(seed) {
     }
   }
   const dj = Array.from(seen.values());
-  dj.sort((a, b) => (b.views || 0) - (a.views || 0));
+  jitterSort(dj);
   return dj.slice(0, 60).map(toResult);
 }
 
@@ -423,7 +442,7 @@ async function fallbackSearch(q) {
     const [id, title, duration, channel, views, thumbnail] = line.split('\t');
     if (!id) return null;
     const raw = String(title || '').trim();
-    return {
+    const item = {
       id,
       title: cleanTitle(raw),
       duration: Number(duration) || 0,
@@ -434,6 +453,8 @@ async function fallbackSearch(q) {
       thumbnail: String(thumbnail || '').trim() || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`,
       official: /official/i.test(raw),
     };
+    if (!isMusicVideo(item)) return null;
+    return item;
   }).filter(Boolean);
 }
 
@@ -562,7 +583,7 @@ app.get('/api/search', async (req, res) => {
         t.channel = stripTopic(t.channel);
         pool.push(t);
       }
-      pool.sort((a, b) => (b.views || 0) - (a.views || 0));
+      jitterSort(pool);
       out = pool.slice(0, 60).map(toResult);
     } else if (type === 'album') {
       // TODAS las canciones del album: se matcha el nombre del album en el titulo
@@ -579,14 +600,14 @@ app.get('/api/search', async (req, res) => {
         t.channel = stripTopic(t.channel);
         pool.push(t);
       }
-      pool.sort((a, b) => (b.views || 0) - (a.views || 0));
+      jitterSort(pool);
       out = pool.slice(0, 50).map(toResult);
     } else if (type === 'playlist') {
       // Colección DJ: combina varias búsquedas relacionadas (género/época/estilo)
       // en un listado amplio de temas, sin duplicados y ordenado por popularidad.
-      const variants = expandDjQuery(q);
+      const variants = shuffle(expandDjQuery(q));
       const seen = new Map();
-      const rawSets = await Promise.allSettled(variants.slice(0, 7).map((v) => ytSearchPages(v, 24, 2)));
+      const rawSets = await Promise.allSettled(variants.slice(0, 4 + Math.floor(Math.random() * 3)).map((v) => ytSearchPages(v, 24, 2 + (Math.random() < 0.5 ? 0 : 1))));
       for (const r of rawSets) {
         if (r.status !== 'fulfilled') continue;
         for (const t of r.value) {
@@ -596,13 +617,13 @@ app.get('/api/search', async (req, res) => {
         }
       }
       const dj = Array.from(seen.values());
-      dj.sort((a, b) => (b.views || 0) - (a.views || 0));
+      jitterSort(dj);
       out = dj.slice(0, 100).map(toResult);
     } else {
-      // cancion: busca a fondo y devuelve las coincidencias EXACTAS primero,
-      // sin limitarse a 10; el cliente luego las rankea por similitud.
+      // cancion: busca a fondo y varía el resultado en cada lanzamiento (mismo
+      // sentido de la palabra, pero distinto orden/subconjunto como un DJ).
       const seen = new Set();
-      const raw = await ytSearchPages(q, 50, 2);
+      const raw = await ytSearchPages(q, 50, 2 + (Math.random() < 0.5 ? 0 : 1));
       const pool = [];
       for (const t of raw) {
         if (!isMusicVideo(t)) continue;
@@ -612,12 +633,8 @@ app.get('/api/search', async (req, res) => {
         t.channel = stripTopic(t.channel);
         pool.push(t);
       }
-      pool.sort((a, b) => (b.views || 0) - (a.views || 0));
-      const exact = pool.filter((t) => nameMatches(t.title, ql));
-      const ranked = exact.length
-        ? exact.concat(pool.filter((t) => !exact.includes(t)))
-        : pool;
-      out = ranked.slice(0, 25).map(toResult);
+      jitterSort(pool);
+      out = pool.slice(0, 25).map(toResult);
     }
 
     // arranque super rapido: pre-resolver el stream del primer resultado mientras se
