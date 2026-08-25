@@ -430,22 +430,48 @@ function stopAutoDJ() {
         console.log("DJ real detectado. Auto-DJ apagado exitosamente.");
     }
 }
+// ---- Puente DJ: recibe webm/opus del emisor (/) y lo transcodifica a MP3
+// continuo para TODOS los oyentes (compatibilidad total de navegadores) ----
+let djTrans = null;
+function startDjTrans() {
+    if (djTrans || !FFMPEG) return;
+    djTrans = spawn(FFMPEG, ['-hide_banner', '-loglevel', 'error',
+        '-i', 'pipe:0', '-c:a', 'libmp3lame', '-b:a', '128k', '-ar', '44100',
+        '-f', 'mp3', 'pipe:1'], { stdio: ['pipe', 'pipe', 'ignore'] });
+    djTrans.stdout.on('data', c => {
+        lastAudioAt = Date.now();
+        radioStats.bytesEnviados += c.length;
+        for (const l of listeners) { try { l.write(c); } catch {} }
+    });
+    djTrans.on('error', () => { djTrans = null; });
+    djTrans.on('close', () => { djTrans = null; });
+    try { djTrans.stdin.on('error', () => {}); } catch {}
+}
+function endDjTrans() {
+    if (!djTrans) return;
+    const t = djTrans; djTrans = null;
+    try { t.stdin.end(); } catch {}
+    setTimeout(() => { try { t.kill(); } catch {} }, 1200);
+}
 io.on('connection', (socket) => {
     socket.on('registrar-dj', () => {
         djConnected = true;
         currentDJSocket = socket.id;
         stopAutoDJ();
+        if (gapProc) { try { gapProc.kill(); } catch {} gapProc = null; } // cortina fuera: entra el DJ
+        startDjTrans();
         console.log("DJ Principal conectado y transmitiendo en vivo.");
     });
     socket.on('stream-desde-dj', (audioChunk) => {
-        if (socket.id === currentDJSocket) {
-            listeners.forEach(listener => listener.write(audioChunk));
-        }
+        if (socket.id !== currentDJSocket) return;
+        lastAudioAt = Date.now();
+        if (djTrans && djTrans.stdin.writable) { try { djTrans.stdin.write(Buffer.from(audioChunk)); } catch {} }
     });
     socket.on('disconnect', () => {
         if (socket.id === currentDJSocket) {
             djConnected = false;
             currentDJSocket = null;
+            endDjTrans();
             startAutoDJ().catch(()=>{});
         }
     });

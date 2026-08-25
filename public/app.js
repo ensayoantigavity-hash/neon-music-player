@@ -2989,3 +2989,52 @@ const fuzzyCatalog = (query, limit = 8) => {
     }
   })();
 })();
+
+// ===== NEON EMISOR: refleja lo que suena en / hacia la radio de los oyentes =====
+// Aislado en try/catch: si algo falla, el reproductor local sigue intacto.
+(function () {
+  try {
+    if (typeof io === 'undefined') return;
+    const el = document.getElementById('audio');
+    if (!el) return;
+
+    let sock = null, rec = null;
+    let actx = null, srcNode = null, destN = null, graph = false;
+
+    function sockOn() {
+      if (sock) return;
+      sock = io();
+      sock.on('connect', () => { try { sock.emit('registrar-dj'); } catch (e) {} });
+    }
+    function buildGraph() {
+      if (graph) return;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) throw new Error('no webaudio');
+      actx = new AC();
+      srcNode = actx.createMediaElementSource(el); // solo se puede una vez por elemento
+      destN = actx.createMediaStreamDestination();
+      srcNode.connect(destN);
+      srcNode.connect(actx.destination); // el DJ sigue oyendo localmente
+      graph = true;
+    }
+    function startEmit() {
+      try {
+        sockOn();
+        buildGraph();
+        if (actx.state === 'suspended') actx.resume();
+        if (rec && rec.state === 'recording') return;
+        const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+        rec = new MediaRecorder(destN.stream, mime ? { mimeType: mime } : undefined);
+        rec.ondataavailable = (e) => {
+          try { if (e.data && e.data.size > 0 && sock) sock.emit('stream-desde-dj', e.data); } catch (err) {}
+        };
+        rec.start(250);
+      } catch (e) { /* sin emision: reproduccion local intacta */ }
+    }
+    function stopEmit() { try { if (rec && rec.state !== 'inactive') rec.stop(); } catch (e) {} }
+
+    el.addEventListener('playing', startEmit);
+    el.addEventListener('pause', stopEmit);
+    el.addEventListener('ended', stopEmit);
+  } catch (e) { /* nunca romper el reproductor */ }
+})();
