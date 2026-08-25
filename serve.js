@@ -259,49 +259,77 @@ process.on('unhandledRejection', (err) => console.log('[neon] unhandledRejection
 
 const COOKIES_LOCAL = path.join(__dirname, 'cookies.txt');
 function autoDjArgs() {
-    const base = ['-f', 'bestaudio', '-o', '-'];
+    const base = ['-f', 'bestaudio', '-o', '-', '--no-warnings'];
     return existsSync(COOKIES_LOCAL)
         ? ['--cookies', COOKIES_LOCAL, ...base]
         : base;
 }
-async function startAutoDJ() {
-    if (djConnected || autoDJProcess) return;
-    // Espera el binario resuelto (global o descargado); nunca spawn a ciegas
-    const bin = await getYtdlp();
-    if (!bin) { setTimeout(startAutoDJ, 15000); return; }
-    console.log("DJ principal desconectado. Activando Auto-DJ de respaldo...");
-    let p;
-    try {
-        p = spawn(bin[0], [...bin.slice(1), ...autoDjArgs(), 'ytsearch:lofi music en vivo'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    } catch (e) {
-        console.log('[neon] spawn fallo:', e.message);
-        setTimeout(startAutoDJ, 10000);
-        return;
+// Semillas de respaldo: SOLO videos normales (los "en vivo" no se pueden pipar a stdout)
+const FALLBACK_SEEDS = ['lofi hip hop mix', 'musica instrumental relajante', 'jazz suave instrumental', 'clasicos instrumentales'];
+const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Bucle DJ: llena lista de IDs (filtra lives) -> transmite cada video uno tras otro
+async function autoDjLoop() {
+    while (!djConnected) {
+        let ids = [];
+        try {
+            const seed = FALLBACK_SEEDS[Math.floor(Math.random() * FALLBACK_SEEDS.length)];
+            console.log('[neon] Auto-DJ buscando: ' + seed);
+            const out = await runYt([
+                '--flat-playlist', '--dump-json', '--no-warnings',
+                '--match-filter', '!is_live',
+                `ytsearch6:${seed}`
+            ], 45000);
+            ids = out.split('\n').filter(l => l.trim().startsWith('{'))
+                .map(l => { try { return JSON.parse(l).id; } catch { return null; } })
+                .filter(Boolean);
+        } catch (e) {
+            radioStats.ultimoError = 'busqueda: ' + e.message;
+        }
+        if (djConnected) return;
+        for (const id of ids) {
+            if (djConnected) return;
+            await new Promise((resolve) => {
+                getYtdlp().then(bin => {
+                    if (!bin || djConnected) return resolve();
+                    let p;
+                    try {
+                        p = spawn(bin[0], [...bin.slice(1), ...autoDjArgs(), `https://www.youtube.com/watch?v=${id}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+                    } catch (e) { radioStats.ultimoError = e.message; return resolve(); }
+                    autoDJProcess = p;
+                    radioStats.arranques++;
+                    p.on('error', (err) => {
+                        radioStats.ultimoError = err.message;
+                        if (autoDJProcess === p) autoDJProcess = null;
+                        resolve();
+                    });
+                    p.stderr.on('data', d => {
+                        const s = d.toString().trim().split('\n').pop();
+                        if (s && !/^\[download\]/.test(s)) radioStats.ultimoError = s.slice(0, 200);
+                    });
+                    p.stdout.on('data', chunk => {
+                        radioStats.bytesEnviados += chunk.length;
+                        if (djConnected) { stopAutoDJ(); return; }
+                        for (const listener of listeners) { try { listener.write(chunk); } catch {} }
+                    });
+                    p.on('close', (code) => {
+                        radioStats.salidas++;
+                        if (autoDJProcess === p) autoDJProcess = null;
+                        resolve();
+                    });
+                });
+            });
+            await sleepMs(350); // micro-pausa entre temas
+        }
+        if (!djConnected) await sleepMs(4000); // nueva semilla al agotar la lista
     }
-    autoDJProcess = p;
-    radioStats.arranques++;
-    // SIN este handler, un ENOENT emite 'error' sin listener y TUMBA el servidor
-    p.on('error', (err) => {
-        console.log('[neon] Auto-DJ child error:', err.message);
-        radioStats.ultimoError = err.message;
-        if (autoDJProcess === p) autoDJProcess = null;
-        if (!djConnected) setTimeout(startAutoDJ, 10000);
-    });
-    p.stderr.on('data', (d) => {
-        const s = d.toString().trim().split('\n').pop();
-        if (s) radioStats.ultimoError = s.slice(0, 200);
-    });
-    p.stdout.on('data', (chunk) => {
-        radioStats.bytesEnviados += chunk.length;
-        if (djConnected) { stopAutoDJ(); return; }
-        for (const listener of listeners) { try { listener.write(chunk); } catch {} }
-    });
-    p.on('close', (code) => {
-        radioStats.salidas++;
-        radioStats.ultimoError = 'exit code ' + code + ' | ' + radioStats.ultimoError;
-        if (autoDJProcess === p) autoDJProcess = null;
-        if (!djConnected) setTimeout(startAutoDJ, 5000);
-    });
+}
+let autoDjLoopIniciado = false;
+function startAutoDJ() {
+    if (autoDjLoopIniciado) return;
+    autoDjLoopIniciado = true;
+    console.log("Radio de respaldo iniciada (Auto-DJ continuo)...");
+    autoDjLoop().catch(e => console.log('[neon] loop error:', e.message));
 }
 function stopAutoDJ() {
     if (autoDJProcess) {
