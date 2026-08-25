@@ -2994,6 +2994,8 @@ const fuzzyCatalog = (query, limit = 8) => {
 // Aislado en try/catch: si algo falla, el reproductor local sigue intacto.
 (function () {
   try {
+    // Solo activo con ?emit=1 (el tee del servidor ya replica el audio a los oyentes)
+    if (!/[?&]emit=1/.test(location.search)) return;
     if (typeof io === 'undefined') return;
     const el = document.getElementById('audio');
     if (!el) return;
