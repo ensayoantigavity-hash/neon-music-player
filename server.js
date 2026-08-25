@@ -1,7 +1,7 @@
 import express from 'express';
 import { spawn, spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
-import { mkdirSync, readdirSync, statSync, existsSync, rmSync, renameSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, existsSync, rmSync, renameSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dgram from 'node:dgram';
@@ -127,7 +127,7 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
   const out = await runYt(args, 60000);
   const url = seekUrl(out);
   if (!url) throw new Error('No se pudo resolver el stream de audio');
-  streamCache.set(videoId, { url, expires: Date.now() + 5 * 60 * 60 * 1000 });
+  streamCache.set(videoId, { url, expires: Date.now() + 45 * 60 * 1000 });
   return url;
 }
 
@@ -199,7 +199,9 @@ app.get('/api/config', (req, res) => {
 
 // ---- "Solo reproductor" (modo escucha): el DJ (app completa) avisa qué tema suena,
 // y los amigos lo escuchan en /escuchar sin buscar ni adelantar/retroceder. ----
-let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '', ts: 0 }; // estado de la "solo reproductor" (se reinicia con cada deploy)
+const NOWPLAYING_FILE = path.join(DOWNLOAD_DIR, 'nowplaying.json');
+let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '', ts: 0 };
+try { const d = JSON.parse(readFileSync(NOWPLAYING_FILE,'utf8')); if(d && d.id) nowPlaying = { ...nowPlaying, ...d }; } catch {}
 const NOWPLAYING_TTL = 9000; // ms: si el DJ no envía latido en este tiempo, se considera desconectado
 app.post('/api/nowplaying', express.json(), (req, res) => {
   const b = req.body || {};
@@ -215,6 +217,7 @@ app.post('/api/nowplaying', express.json(), (req, res) => {
       ts: Date.now(),
     };
     nowPlaying.playing = b.playing !== false;
+    try { writeFileSync(NOWPLAYING_FILE, JSON.stringify(nowPlaying)); } catch {}
   }
   res.json({ ok: true });
 });
@@ -759,7 +762,7 @@ app.get('/api/stream/:id', async (req, res) => {
   const videoId = extractVideoId(req.params.id);
   if (!videoId) return res.status(400).json({ error: 'ID de video inválido' });
   try {
-    if (failedIds.has(videoId) && Date.now() - failedIds.get(videoId) < 20 * 60 * 1000) {
+    if (failedIds.has(videoId) && Date.now() - failedIds.get(videoId) < 3 * 60 * 1000) {
       return res.status(410).json({ error: 'Video restringido', blocked: true });
     }
     const url = await getPlayableStream(videoId);
