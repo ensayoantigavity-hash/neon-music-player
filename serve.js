@@ -252,8 +252,57 @@ async function probeStream(url) {
 }
 
 const inflight = new Map();
-// CARRERA PARALELA: lanza los 3 caminos a la vez y gana el mas rapido.
-// (antes eran 3 intentos en serie x35s = 105s de cuelgues; ahora ~el mejor tiempo)
+// ---- Espejos comunitarios (Piped/Invidious): resuelven audio sin pasar por
+// el muro anti-bot de la IP de Render. Se usan como cuarto corredor. ----
+const PIPED_BASES = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://api.piped.private.coffee',
+];
+const INVIDIOUS_BASES = [
+  'https://inv.nadeko.net',
+  'https://invidious.nerdvpn.de',
+];
+async function fetchJsonConTimeout(u, ms = 8000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(u, { redirect: 'follow', signal: ctrl.signal, headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+async function extraerViaEspejo(videoId) {
+  // 1) Piped: /streams/{id} -> audioStreams[]
+  for (const base of PIPED_BASES) {
+    try {
+      const j = await fetchJsonConTimeout(base + '/streams/' + videoId, 7000);
+      const lista = Array.isArray(j && j.audioStreams) ? j.audioStreams : [];
+      let mejor = null;
+      for (const a of lista) {
+        if (!a || !a.url) continue;
+        if (!mejor || (Number(a.bitrate) || 0) > (Number(mejor.bitrate) || 0)) mejor = a;
+      }
+      if (mejor && /^https?:/.test(mejor.url)) return mejor.url;
+    } catch { /* siguiente espejo */ }
+  }
+  // 2) Invidious: /api/v1/videos/{id} -> adaptiveFormats[]
+  for (const base of INVIDIOUS_BASES) {
+    try {
+      const j = await fetchJsonConTimeout(base + '/api/v1/videos/' + videoId, 7000);
+      const lista = Array.isArray(j && j.adaptiveFormats) ? j.adaptiveFormats : [];
+      let mejor = null;
+      for (const a of lista) {
+        if (!a || !a.url || !/^audio/.test(String(a.type || ''))) continue;
+        if (!mejor || (Number(a.bitrate) || 0) > (Number(mejor.bitrate) || 0)) mejor = a;
+      }
+      if (mejor && /^https?:/.test(mejor.url)) return mejor.url;
+    } catch { /* siguiente espejo */ }
+  }
+  throw new Error('sin espejo disponible');
+}
+
+// CARRERA PARALELA: lanza los 3 caminos + espejos a la vez y gana el mas rapido.
 function getPlayableStream(videoId) {
   if (inflight.has(videoId)) return inflight.get(videoId);
   const p = (async () => {
@@ -261,6 +310,7 @@ function getPlayableStream(videoId) {
       resolveStream(videoId, { clients: ['web', 'mweb'], fmt: 'ba/b', timeoutMs: 30000, force: true }),
       resolveStream(videoId, { clients: ['tv', 'tv_simply', 'ios'], fmt: 'ba/b', timeoutMs: 30000, force: true }),
       resolveStream(videoId, { clients: ['android', 'android_vr'], fmt: '18/b', timeoutMs: 30000, force: true }),
+      extraerViaEspejo(videoId),
     ].map((pr, i) => pr.catch(e => { throw new Error(`v${i}: ` + e.message); }));
     // El primero que devuelva URL gana; los demas se descartan
     const url = await Promise.any(carreras);
