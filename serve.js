@@ -230,27 +230,50 @@ app.get('/radio/stream', (req, res) => {
         listeners = listeners.filter(l => l !== res);
     });
 });
-function startAutoDJ() {
+// Red de seguridad global: NINGUN error de proceso hijo puede tumbar la radio
+process.on('uncaughtException', (err) => console.log('[neon] uncaughtException:', err.message));
+process.on('unhandledRejection', (err) => console.log('[neon] unhandledRejection:', String(err)));
+
+const COOKIES_LOCAL = path.join(__dirname, 'cookies.txt');
+function autoDjArgs() {
+    const base = ['-f', 'bestaudio', '-o', '-'];
+    return existsSync(COOKIES_LOCAL)
+        ? ['--cookies', COOKIES_LOCAL, ...base]
+        : base;
+}
+async function startAutoDJ() {
     if (djConnected || autoDJProcess) return;
+    // Espera el binario resuelto (global o descargado); nunca spawn a ciegas
+    const bin = await YTDLP_READY;
+    if (!bin) { setTimeout(startAutoDJ, 15000); return; }
     console.log("DJ principal desconectado. Activando Auto-DJ de respaldo...");
-    autoDJProcess = spawn('yt-dlp', [
-        '--cookies', 'cookies.txt',
-        '-f', 'bestaudio',
-        '-o', '-',
-        'ytsearch:lofi music en vivo'
-    ]);
-    autoDJProcess.stdout.on('data', (chunk) => {
-        if (djConnected) { stopAutoDJ(); return; }
-        listeners.forEach(listener => listener.write(chunk));
+    let p;
+    try {
+        p = spawn(bin[0], [...bin.slice(1), ...autoDjArgs(), 'ytsearch:lofi music en vivo'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+        console.log('[neon] spawn fallo:', e.message);
+        setTimeout(startAutoDJ, 10000);
+        return;
+    }
+    autoDJProcess = p;
+    // SIN este handler, un ENOENT emite 'error' sin listener y TUMBA el servidor
+    p.on('error', (err) => {
+        console.log('[neon] Auto-DJ child error:', err.message);
+        if (autoDJProcess === p) autoDJProcess = null;
+        if (!djConnected) setTimeout(startAutoDJ, 10000);
     });
-    autoDJProcess.on('close', () => {
-        autoDJProcess = null;
-        if (!djConnected) startAutoDJ();
+    p.stdout.on('data', (chunk) => {
+        if (djConnected) { stopAutoDJ(); return; }
+        for (const listener of listeners) { try { listener.write(chunk); } catch {} }
+    });
+    p.on('close', () => {
+        if (autoDJProcess === p) autoDJProcess = null;
+        if (!djConnected) setTimeout(startAutoDJ, 5000);
     });
 }
 function stopAutoDJ() {
     if (autoDJProcess) {
-        autoDJProcess.kill();
+        try { autoDJProcess.kill(); } catch {}
         autoDJProcess = null;
         console.log("DJ real detectado. Auto-DJ apagado exitosamente.");
     }
@@ -271,7 +294,7 @@ io.on('connection', (socket) => {
         if (socket.id === currentDJSocket) {
             djConnected = false;
             currentDJSocket = null;
-            startAutoDJ();
+            startAutoDJ().catch(()=>{});
         }
     });
 });
