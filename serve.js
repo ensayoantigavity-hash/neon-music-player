@@ -1,100 +1,61 @@
+// serve.js
 import express from 'express';
-import { exec } from 'child_process';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import cors from 'cors';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
-// Configuración necesaria en módulos modernos para manejar rutas de carpetas
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-app.use(express.json());
+// 1. CORS abierto para cualquier navegador
+app.use(cors());
+// 2. Rutas estáticas limpias
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
 
-/**
- * RUTA PRINCIPAL DE BÚSQUEDA Y AUTO DJ INFINITO
- */
-app.get('/api/search', (req, res) => {
-    const queryUsuario = req.query.q;
+const YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
+const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web').split(',').map(s=>s.trim());
+const COOKIES = process.env.YTDLP_COOKIES_FILE || 'cookies.txt';
+function cookieArgs(){ return COOKIES && (await import('node:fs')).existsSync(COOKIES) ? ['--cookies', COOKIES] : []; }
 
-    if (!queryUsuario) {
-        return res.status(400).json({ error: "Falta el parámetro de búsqueda 'q'" });
-    }
+// Helper yt-dlp
+function runYt(args, t=20000){
+  return new Promise((res,rej)=>{
+    const p=spawn(YTDLP_BIN[0], [...YTDLP_BIN.slice(1), ...args]);
+    let o='',e=''; p.stdout.on('data',d=>o+=d); p.stderr.on('data',d=>e+=d);
+    const tm=setTimeout(()=>{try{p.kill()}catch{};rej(new Error('timeout'))},t);
+    p.on('close',c=>{ clearTimeout(tm); c===0?res(o):rej(new Error(e||o)) });
+  });
+}
 
-    const queryOptimizado = `${queryUsuario} mix playlist`;
-
-    // Parámetros antibloqueo optimizados
-    const comandoYtdlp = `yt-dlp "ytsearch15:${queryOptimizado}" --flat-playlist --extractor-args "youtube:player-client=mweb" --no-cache-dir --dump-json --ignore-errors`;
-
-    exec(comandoYtdlp, (error, stdout, stderr) => {
-        if (error) {
-            console.error("Error al ejecutar yt-dlp:", error);
-            return res.status(500).json({ error: "Error interno procesando la música." });
-        }
-
-        const lineas = stdout.trim().split('\n');
-        let listaCanciones = [];
-
-        lineas.forEach(linea => {
-            try {
-                if (!linea) return;
-                const item = JSON.parse(linea);
-
-                if (item._type === 'playlist' && item.entries) {
-                    item.entries.forEach(track => {
-                        if (track.title && track.id) {
-                            listaCanciones.push({
-                                title: track.title,
-                                id: track.id,
-                                url: `https://youtube.com{track.id}`,
-                                duration: track.duration || 0
-                            });
-                        }
-                    });
-                } else if (item.title && item.id) {
-                    listaCanciones.push({
-                        title: item.title,
-                        id: item.id,
-                        url: item.webpage_url || `https://youtube.com{item.id}`,
-                        duration: item.duration || 0
-                    });
-                }
-            } catch (e) {
-                // Saltar errores parciales
-            }
-        });
-
-        res.json({
-            busquedaOriginal: queryUsuario,
-            totalCanciones: listaCanciones.length,
-            canciones: listaCanciones
-        });
-    });
+// /api/search - evasión móvil intacta
+app.get('/api/search', async(req,res)=>{
+  const q=String(req.query.q||'').trim(); if(!q) return res.status(400).json({error:'Falta q'});
+  try{
+    const out=await runYt(['--cookies',COOKIES,'--flat-playlist','--dump-json','--no-warnings',
+      '--extractor-args',`youtube:player_client=${CLIENT_CHAIN.join(',')}`, `ytsearch15:${q}`]);
+    const results=out.split('\n').filter(l=>l.startsWith('{')).map(l=>JSON.parse(l)).map(j=>({
+      id:j.id, title:j.title, channel:j.channel, duration:j.duration,
+      thumbnail:`https://i.ytimg.com/vi/${j.id}/hqdefault.jpg`
+    }));
+    res.json({results});
+  }catch(e){ res.status(500).json({error:e.message}); }
 });
 
-/**
- * RUTA PARA OBTENER EL ENLACE DIRECTO DE AUDIO (STREAMING)
- */
-app.get('/api/stream', (req, res) => {
-    const videoId = req.query.id;
-    if (!videoId) return res.status(400).json({ error: "Falta el ID del video" });
-
-    const videoUrl = `https://youtube.com{videoId}`;
-    const comandoStream = `yt-dlp "${videoUrl}" --extractor-args "youtube:player-client=mweb" --no-cache-dir -f "bestaudio" -g`;
-
-    exec(comandoStream, (error, stdout, stderr) => {
-        if (error) {
-            console.error("Error al extraer streaming de audio:", error);
-            return res.status(500).json({ error: "No se pudo obtener el audio de este tema." });
-        }
-
-        const streamUrl = stdout.trim();
-        res.json({ audioUrl: streamUrl });
-    });
+// /api/stream - evasión móvil intacta, solo audio
+app.get('/api/stream', async(req,res)=>{
+  const id=String(req.query.id||'').trim(); if(!id) return res.status(400).json({error:'Falta id'});
+  try{
+    const out=await runYt(['--cookies',COOKIES,'-f','bestaudio','-g',
+      '--extractor-args',`youtube:player_client=${CLIENT_CHAIN.join(',')}`,
+      `https://www.youtube.com/watch?v=${id}`]);
+    const url=out.split('\n').find(l=>l.startsWith('http'))?.trim();
+    if(!url) throw new Error('No url');
+    res.json({url});
+  }catch(e){ res.status(500).json({error:e.message}); }
 });
 
-app.listen(PORT, () => {
-    console.log(`Neon Music Server corriendo con éxito en el puerto ${PORT}`);
-});
+app.get('/escuchar',(req,res)=>res.sendFile(path.resolve('public','listener.html')));
+app.listen(PORT,()=>console.log('Neon http://localhost:'+PORT));
