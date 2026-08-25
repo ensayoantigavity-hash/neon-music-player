@@ -29,6 +29,11 @@ function detectFfmpeg() {
     const r = spawnSync('python', ['-c', 'import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())'], { encoding: 'utf8', timeout: 20000 });
     if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
   } catch { /* noop */ }
+  // respaldo: binario ffmpeg del sistema (instalado vía apt en el Docker)
+  try {
+    const r = spawnSync('ffmpeg', ['-version'], { encoding: 'utf8', timeout: 10000 });
+    if (r.status === 0 && r.stdout.trim()) return 'ffmpeg';
+  } catch { /* noop */ }
   return null;
 }
 const FFMPEG = detectFfmpeg();

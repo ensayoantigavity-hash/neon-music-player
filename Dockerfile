@@ -4,6 +4,7 @@ FROM node:20-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-pip ca-certificates ffmpeg \
  && update-ca-certificates \
+ && ln -sf /usr/bin/python3 /usr/local/bin/python \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
