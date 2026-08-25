@@ -1,15 +1,14 @@
 {
   "name": "neon-music-radio",
-  "version": "1.0.0",
-  "description": "Reproductor de audio autonomo: busca musica en la web y la reproduce sin anuncios",
   "type": "module",
-  "main": "serve.js",
   "scripts": {
-    "start": "node serve.js"
+    "start": "node serve.js",
+    "postinstall": "npx youtube-dl-exec --download-only"
   },
   "dependencies": {
     "express": "^4.21.0",
     "cors": "^2.8.5",
-    "socket.io": "^4.7.5"
+    "socket.io": "^4.7.5",
+    "youtube-dl-exec": "^3.0.10"
   }
 }
