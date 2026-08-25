@@ -1,95 +1,74 @@
+// server.js
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server } from 'socket.io';
-import { createRequire } from 'node:module';
-import { PassThrough } from 'node:stream';
+import { createReadStream, existsSync } from 'node:fs';
 import path from 'node:path';
-import { exec } from 'node:child_process';
+import needle from 'needle';
 
-const require = createRequire(import.meta.url);
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server,{cors:{origin:"*"}});
 
-app.use(cors({ origin: "*" }));
+app.use(cors({origin:"*"}));
 app.use(express.json());
 app.use(express.static('public'));
 
-const COOKIES = path.resolve('cookies.txt');
 const PORT = process.env.PORT || 10000;
+let djConnected=false, currentDJSocket=null, autoDJProcess=null;
+let listeners=[];
 
-let djConnected = false, currentDJSocket = null, autoDJProcess = null;
-let listeners = [];
+// URL pública estable 24h (cámbiala por tu MP3 directo si prefieres)
+const FALLBACK_URL = 'https://stream.laut.fm/lofi'; 
+const FALLBACK_FILE = path.resolve('public/station-id.mp3');
 
-app.get('/escuchar', (req, res) => {
-  res.sendFile(path.resolve('public', 'listener.html'));
+app.get('/radio/stream',(req,res)=>{
+  res.writeHead(200,{'Content-Type':'audio/mpeg','Transfer-Encoding':'chunked','Cache-Control':'no-cache','Connection':'keep-alive'});
+  listeners.push(res);
+  req.on('close',()=>{ listeners = listeners.filter(l => l !== res); });
 });
 
-app.get('/radio/stream', (req, res) => {
-  res.writeHead(200, {
-    'Content-Type': 'audio/mpeg',
-    'Transfer-Encoding': 'chunked',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
-  });
+function startAutoDJ(){
+  if(djConnected || autoDJProcess) return;
+  console.log("Auto-DJ directo: sin yt-dlp, usando stream público/archivo local");
 
-  req.on('close', () => {
-      listeners = listeners.filter(l => l !== res);
-  });
-});
+  // Intenta stream de red directo con needle (liviano, sin npx)
+  const isUrl = FALLBACK_URL.startsWith('http');
+  const stream = isUrl ? needle.get(FALLBACK_URL) : createReadStream(FALLBACK_FILE);
 
-function startAutoDJ() {
-  if (djConnected || autoDJProcess) return;
-  console.log("Iniciando Auto-DJ de respaldo...");
-  
-  // Usamos un comando nativo del sistema llamando directamente a yt-dlp instalado por la librería
-  const cmd = `npx yt-dlp --cookies "${COOKIES}" -f bestaudio -o - "ytsearch:lofi music radio en vivo"`;
-  
-  autoDJProcess = exec(cmd, { maxBuffer: 1024 * 1024 * 50 });
-  
-  autoDJProcess.stdout.on('data', c => {
-    if (djConnected) { stopAutoDJ(); return; }
-    listeners.forEach(r => { try { r.write(c); } catch {} });
-  });
-  
-  autoDJProcess.on('close', () => {
-    autoDJProcess = null;
-    if (!djConnected) startAutoDJ();
-  });
-  
-  autoDJProcess.on('error', () => { autoDJProcess = null; });
-}
+  autoDJProcess = stream;
 
-function stopAutoDJ() {
-  if (autoDJProcess) {
-    try { autoDJProcess.kill(); } catch {}
-    autoDJProcess = null;
-    console.log("Auto-DJ detenido.");
-  }
-}
-
-io.on('connection', socket => {
-  socket.on('registrar-dj', () => {
-    djConnected = true; 
-    currentDJSocket = socket.id;
-    stopAutoDJ();
+  stream.on('data', chunk=>{
+    if(djConnected){ try{stream.destroy()}catch{}; autoDJProcess=null; return; }
+    listeners.forEach(r=>{ try{r.write(chunk)}catch{} });
   });
-  
-  socket.on('stream-desde-dj', c => {
-    if (socket.id === currentDJSocket) {
-      listeners.forEach(r => { try { r.write(Buffer.from(c)); } catch {} });
+  stream.on('end',()=>{
+    autoDJProcess=null;
+    if(!djConnected) setTimeout(startAutoDJ, 500);
+  });
+  stream.on('error',()=>{
+    autoDJProcess=null;
+    // Si falla la URL, cae al archivo local en bucle
+    if(isUrl && existsSync(FALLBACK_FILE)){
+      const fileStream = createReadStream(FALLBACK_FILE);
+      autoDJProcess = fileStream;
+      fileStream.on('data',c=>{ if(!djConnected) listeners.forEach(r=>r.write(c)); });
+      fileStream.on('end',()=>{ autoDJProcess=null; if(!djConnected) startAutoDJ(); });
+    }else if(!djConnected){
+      setTimeout(startAutoDJ, 2000);
     }
   });
-  
-  socket.on('disconnect', () => {
-    if (socket.id === currentDJSocket) {
-      djConnected = false; 
-      currentDJSocket = null;
-      startAutoDJ();
-    }
-  });
+}
+function stopAutoDJ(){
+  if(autoDJProcess){ try{autoDJProcess.destroy()}catch{}; autoDJProcess=null; }
+}
+
+io.on('connection',socket=>{
+  socket.on('registrar-dj',()=>{ djConnected=true; currentDJSocket=socket.id; stopAutoDJ(); });
+  socket.on('stream-desde-dj',c=>{ if(socket.id===currentDJSocket) listeners.forEach(r=>r.write(Buffer.from(c))); });
+  socket.on('disconnect',()=>{ if(socket.id===currentDJSocket){ djConnected=false; currentDJSocket=null; startAutoDJ(); }});
 });
 
 startAutoDJ();
-server.listen(PORT, () => console.log('Radio corriendo en puerto ' + PORT));
+server.listen(PORT,()=>console.log('Radio http://localhost:'+PORT));
