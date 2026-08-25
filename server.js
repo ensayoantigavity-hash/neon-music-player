@@ -622,11 +622,10 @@ app.get('/api/search', async (req, res) => {
       jitterSort(pool);
       out = pool.slice(0, 50).map(toResult);
     } else if (type === 'playlist') {
-      // Colección DJ: combina varias búsquedas relacionadas (género/época/estilo)
-      // en un listado amplio de temas, sin duplicados y ordenado por popularidad.
+      // Colección DJ: 2-3 búsquedas livianas para no saturar Render ni gatillar bloqueo Innertube
       const variants = shuffle(expandDjQuery(q));
       const seen = new Map();
-      const rawSets = await Promise.allSettled(variants.slice(0, 4 + Math.floor(Math.random() * 3)).map((v) => ytSearchPages(v, 24, 2 + (Math.random() < 0.5 ? 0 : 1))));
+      const rawSets = await Promise.allSettled(variants.slice(0, 2 + Math.floor(Math.random() * 2)).map((v) => ytSearchPages(v, 20, 2)));
       for (const r of rawSets) {
         if (r.status !== 'fulfilled') continue;
         for (const t of r.value) {
@@ -638,22 +637,22 @@ app.get('/api/search', async (req, res) => {
       const dj = Array.from(seen.values());
       jitterSort(dj);
       out = dj.slice(0, 100).map(toResult);
-      // Garantía: si la colección DJ quedó vacía (bloqueo Innertube), fallback a búsqueda simple
-      if (!out.length) {
+      // Garantía: si la colección quedó corta (<10), completar con búsqueda simple
+      if (out.length < 10) {
         try {
           const fbRaw = await ytSearchPages(q, 30, 2);
-          const fbSeen = new Set();
+          const fbSeen = new Set(out.map(x=>x.id));
           const fbPool = [];
           for (const t of fbRaw) {
             if (!isMusicVideo(t)) continue;
-            if (fbSeen.has(t.id)) continue;
+            if (fbSeen.has(t.id) || seen.has(t.id)) continue;
             fbSeen.add(t.id);
             t.title = cleanTitle(t.title);
             t.channel = stripTopic(t.channel);
             fbPool.push(t);
           }
           jitterSort(fbPool);
-          out = fbPool.slice(0, 25).map(toResult);
+          out = out.concat(fbPool.slice(0, 25 - out.length).map(toResult));
         } catch {}
       }
     } else {
