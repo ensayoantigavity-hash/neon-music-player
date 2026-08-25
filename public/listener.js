@@ -6,15 +6,16 @@
   const elArtist = document.getElementById('artist');
   const elStatus = document.getElementById('status');
   const elCover = document.getElementById('cover');
-  const btnEnter = document.getElementById('enter');
-  const card = document.querySelector('.card');
+  const playBtn = document.getElementById('playBtn');
+  const vol = document.getElementById('vol');
   const dot = document.getElementById('dot');
+  const card = document.querySelector('.card');
 
   let player = null;
   let ready = false;
   let currentId = '';
   let currentPlaying = false;
-  let userStarted = false;
+  let localPaused = false; // el amigo pausó manualmente
   let lastData = { id: '', title: '', artist: '', thumbnail: '', playing: false, station: '' };
 
   const YT_READY = Promise.race([
@@ -23,32 +24,37 @@
   ]);
   window.onYouTubeIframeAPIReady = () => { if (window.__ytListenReady) window.__ytListenReady(true); };
 
+  const setIcon = () => { playBtn.textContent = currentPlaying ? '⏸' : '▶'; };
+
   const startPlayer = () => {
     if (player) return;
     player = new YT.Player('yt-host', {
       playerVars: { autoplay: 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, fs: 0, playsinline: 1 },
       events: {
-        onReady: () => { ready = true; applyState(); },
+        onReady: () => { ready = true; try { player.setVolume(vol.value); } catch (e) {} applyState(); },
         onStateChange: (e) => {
           const S = (window.YT && window.YT.PlayerState) || {};
-          if (e.data === S.PLAYING) { currentPlaying = true; userStarted = true; btnEnter.style.display = 'none'; elStatus.textContent = ''; }
-          else if (e.data === S.PAUSED) currentPlaying = false;
+          if (e.data === S.PLAYING) { currentPlaying = true; localPaused = false; setIcon(); elStatus.textContent = ''; }
+          else if (e.data === S.PAUSED) { currentPlaying = false; setIcon(); }
         },
         onError: () => { elStatus.textContent = 'Este tema está bloqueado por YouTube; esperando el siguiente…'; },
       },
     });
   };
 
-  // Refleja el estado del DJ: precarga el video y reproduce/pausa según corresponda.
-  // El play se intenta en cada consulta (reproducción automática si el navegador lo permite).
+  // Sigue al master: cambia de tema y obedece play/pausa del DJ.
+  // El amigo puede pausar (localPaused) o bajar el volumen sin perder la conexión.
   const applyState = () => {
     if (!ready || !player) return;
     if (lastData.id && lastData.id !== currentId) {
       currentId = lastData.id;
+      localPaused = false;
       try { player.cueVideoById(lastData.id); } catch (e) {}
+      playBtn.disabled = false; vol.disabled = false;
     }
-    if (lastData.playing && !currentPlaying) { try { player.playVideo(); } catch (e) {} }
-    else if (!lastData.playing && currentPlaying) { try { player.pauseVideo(); } catch (e) {} currentPlaying = false; }
+    if (!lastData.id) { playBtn.disabled = true; vol.disabled = true; return; }
+    if (lastData.playing && !currentPlaying && !localPaused) { try { player.playVideo(); } catch (e) {} }
+    else if (!lastData.playing && currentPlaying) { try { player.pauseVideo(); } catch (e) {} currentPlaying = false; setIcon(); }
   };
 
   const render = (d) => {
@@ -72,8 +78,6 @@
       if (dot) dot.className = 'dot on';
       lastData = d || lastData;
       render(d);
-      if (d.id) elStatus.textContent = '';
-      else elStatus.textContent = '';
       applyState();
     } catch (e) {
       if (dot) dot.className = 'dot off';
@@ -81,17 +85,13 @@
     }
   };
 
-  const enter = () => {
-    if (userStarted) return;
-    userStarted = true;
-    btnEnter.style.display = 'none';
-    elStatus.textContent = 'Conectando a la radio…';
-    if (ready && currentId) { try { player.playVideo(); } catch (e) {} currentPlaying = true; }
-    applyState();
-  };
+  playBtn.addEventListener('click', () => {
+    if (!ready || !player || !currentId) return;
+    if (currentPlaying) { try { player.pauseVideo(); } catch (e) {} localPaused = true; }
+    else { try { player.playVideo(); } catch (e) {} localPaused = false; }
+  });
 
-  btnEnter.addEventListener('click', enter);
-  if (card) card.addEventListener('click', () => { if (!userStarted) enter(); });
+  vol.addEventListener('input', () => { if (player && player.setVolume) { try { player.setVolume(vol.value); } catch (e) {} } });
 
   YT_READY.then((ok) => { if (ok) startPlayer(); else elStatus.textContent = 'No se pudo cargar el reproductor de YouTube'; });
   setInterval(poll, 1500);

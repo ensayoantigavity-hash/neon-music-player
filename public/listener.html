@@ -30,13 +30,17 @@
       background: #0c1322; box-shadow: 0 0 30px rgba(25,227,255,0.25); display: none; }
     .title { font-size: 20px; font-weight: 700; line-height: 1.25; margin: 0 0 4px; }
     .artist { font-size: 14px; color: #9fb6d4; margin: 0 0 22px; }
-    .status { font-size: 13px; color: #7d93b3; min-height: 18px; }
-    .enter {
-      margin-top: 18px; padding: 14px 26px; font-size: 16px; font-weight: 700; cursor: pointer;
-      color: #04121c; border: none; border-radius: 999px;
-      background: linear-gradient(90deg, var(--neon), var(--neon2)); box-shadow: 0 0 24px rgba(25,227,255,0.4);
+    .controls { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 6px 0 10px; }
+    .play {
+      width: 64px; height: 64px; border-radius: 50%; border: none; cursor: pointer; font-size: 24px;
+      color: #04121c; background: linear-gradient(90deg, var(--neon), var(--neon2));
+      box-shadow: 0 0 24px rgba(25,227,255,0.45); display: flex; align-items: center; justify-content: center;
     }
-    .enter:active { transform: scale(0.97); }
+    .play:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+    .play:active { transform: scale(0.96); }
+    .vol { width: 150px; accent-color: var(--neon); }
+    .vol:disabled { opacity: 0.4; }
+    .status { font-size: 13px; color: #7d93b3; min-height: 18px; }
     #yt-host { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; overflow: hidden; }
   </style>
 </head>
@@ -47,8 +51,11 @@
     <img class="cover" id="cover" alt="" />
     <div class="title" id="title">NEON MUSIC</div>
     <div class="artist" id="artist"></div>
+    <div class="controls">
+      <button class="play" id="playBtn" disabled>▶</button>
+      <input class="vol" id="vol" type="range" min="0" max="100" value="80" disabled />
+    </div>
     <div class="status" id="status"></div>
-    <button class="enter" id="enter">▶ Entrar a la radio</button>
   </div>
   <div id="yt-host"></div>
   <script src="https://www.youtube.com/iframe_api"></script>
