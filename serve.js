@@ -290,6 +290,17 @@ let listeners = [];
 const radioStats = { arranques: 0, salidas: 0, ultimoError: '', bytesEnviados: 0 };
 let lastAudioAt = 0;      // ultima vez que fluyo audio real (googlevideo)
 
+// ---- TEE del master: los bytes de /api/stream que recibe el DJ se copian a oyentes ----
+let teeActivo = false;
+let lastTeeAt = 0;
+function teeWrite(buf) {
+    lastAudioAt = Date.now();
+    lastTeeAt = Date.now();
+    radioStats.bytesEnviados += buf.length;
+    for (const l of listeners) { try { l.write(buf); } catch {} }
+}
+function teeFresco() { return Date.now() - lastTeeAt < 8000; }
+
 // Vigia de 1s: caduca al DJ sin audio real y dispara el CLON del master.
 // (la cortina "Estas escuchando Neon Music" fue retirada a peticion del dueno)
 setInterval(() => {
@@ -346,6 +357,7 @@ let cloneAbortCtrl = null;
 let ultimoClonadoId = '';
 
 async function iniciarClonDeMaster() {
+    if (teeFresco()) return; // el tee del master ya lleva el mismo audio
     const np = nowPlaying;
     const fresco = np.id && np.ts && (Date.now() - np.ts < NOWPLAYING_TTL + 3000) && np.playing !== false;
     if (djConnected || clonando || !fresco || np.id === ultimoClonadoId) return;
@@ -410,6 +422,7 @@ async function streamOneToListeners(id) {
 // Se pausa solo si hay DJ en vivo O si el clon del master esta transmitiendo.
 async function autoDjLoop() {
     while (!djConnected && !clonando) {
+        if (teeFresco()) { await sleepMs(2000); continue; } // el tee manda: Auto-DJ en pausa
         let ids = [];
         // Prioridad: lo ultimo buscado en la app (station) -> asi la radio sigue el gusto actual
         const stationSeed = (nowPlaying.station || '').trim();
@@ -538,6 +551,8 @@ app.get('/api/radiostatus', (req, res) => {
   res.json({
     djConnected,
     djVivo: djConnected && (Date.now() - lastDjChunkAt < 5000),
+    tee: teeActivo,
+    teeHaceMs: lastTeeAt ? (Date.now() - lastTeeAt) : -1,
     clonando,
     clonandoId: ultimoClonadoId,
     autoDjActivo: !!autoDJProcess,
@@ -1231,8 +1246,14 @@ app.get('/api/stream/:id', async (req, res) => {
       }
     }
 
+    // ---- TEE: si es la reproduccion inicial del master (sin Range o bytes=0-),
+    // los mismos bytes que recibe su navegador se copian a los oyentes de /radio/stream.
+    // Cero re-extraccion: el oyente escucha EXACTAMENTE el mismo audio. ----
+    const esReproduccionMaster = !range || /^bytes=0-\s*$/i.test(range);
+    if (esReproduccionMaster) { teeActivo = true; lastTeeAt = Date.now(); }
+
     if (!total) {
-      // Sin tama+ï¿½o conocido: servimos lo que el upstream devuelva (fallback directo).
+      // Sin tamano conocido: servimos lo que el upstream devuelva (fallback directo).
       const upstream = await fetch(url, {
         headers: range ? { Range: range } : {},
         redirect: 'follow',
@@ -1247,9 +1268,19 @@ app.get('/api/stream/:id', async (req, res) => {
       }
       res.setHeader('Cache-Control', 'no-store');
       res.status(upstream.status);
-      const body = Readable.fromWeb(upstream.body);
-      body.pipe(res);
-      req.on('close', () => body.destroy());
+      const reader = upstream.body.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const buf = Buffer.from(value);
+          res.write(buf);
+          if (teeActivo) teeWrite(buf);
+        }
+        res.end();
+      } catch { /* cliente corto la conexion */ }
+      req.on('close', () => { try { reader.cancel(); } catch {} });
+      if (esReproduccionMaster) teeActivo = false;
       return;
     }
 
@@ -1277,13 +1308,15 @@ app.get('/api/stream/:id', async (req, res) => {
         const { done, value } = await reader.read();
         if (done) break;
         if (onClose()) { try { reader.cancel(); } catch (ignored) {} break; }
-        if (!res.write(value)) await new Promise((resolve) => res.once('drain', resolve));
+        const buf = Buffer.from(value);
+        if (!res.write(buf)) await new Promise((resolve) => res.once('drain', resolve));
+        if (teeActivo) teeWrite(buf); // mismo audio -> oyentes
       }
     })();
 
     let pos = start;
     let closed = false;
-    req.on('close', () => { closed = true; });
+    req.on('close', () => { closed = true; if (esReproduccionMaster) teeActivo = false; });
     try {
       let pending = null; // promise del siguiente chunk (prefetch)
       while (pos <= end && !closed) {
