@@ -27,10 +27,14 @@
     player = new YT.Player('yt-host', {
       playerVars: { autoplay: 0, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, fs: 0, playsinline: 1 },
       events: {
-        onReady: () => { ready = true; cueCurrent(); },
+        onReady: () => {
+          ready = true;
+          cueCurrent();
+          if (lastData.playing) { try { player.playVideo(); } catch (e) {} } // intento automático (mismo navegador del DJ)
+        },
         onStateChange: (e) => {
           const S = (window.YT && window.YT.PlayerState) || {};
-          if (e.data === S.PLAYING) currentPlaying = true;
+          if (e.data === S.PLAYING) { currentPlaying = true; userStarted = true; btnEnter.style.display = 'none'; }
           else if (e.data === S.PAUSED) currentPlaying = false;
         },
         onError: () => { elStatus.textContent = 'Este tema está bloqueado por YouTube; esperando el siguiente…'; },
@@ -55,15 +59,15 @@
   };
 
   const render = (d) => {
-    elStation.textContent = (d.station && d.station.trim()) ? d.station.toUpperCase() : 'RADIO EN VIVO';
+    elStation.textContent = (d.station && d.station.trim()) ? d.station.toUpperCase() : 'NEON MUSIC';
     if (d.id) {
-      elTitle.textContent = d.title || 'Sin título';
+      elTitle.textContent = d.title || 'NEON MUSIC';
       elArtist.textContent = d.artist || '';
       if (d.thumbnail) { elCover.src = d.thumbnail; elCover.style.display = 'block'; }
       else elCover.style.display = 'none';
     } else {
-      elTitle.textContent = 'Esperando al DJ…';
-      elArtist.textContent = 'El que comparte eligió la música';
+      elTitle.textContent = 'NEON MUSIC';
+      elArtist.textContent = '';
       elCover.style.display = 'none';
     }
   };
