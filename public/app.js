@@ -2346,25 +2346,27 @@ const fuzzyCatalog = (query, limit = 8) => {
   };
 
   // ---------- eventos de audio ----------
-  // Desbloqueo síncrono para autoplay: debe ejecutarse DENTRO del gesto del usuario
-  // antes del await fetch de la búsqueda, si no el play() posterior pierde la activación.
-  const unlockAudioSync = () => {
+  // Desbloqueo síncrono para autoplay: gana sticky activation dentro del gesto
+  const unlockForSearch = () => {
     try {
       ensureAudioGraph();
       if (window.AudioContext && actx && actx.state === 'suspended') try{ actx.resume(); }catch{}
-      // Intento silencioso dentro del gesto para ganar sticky activation
-      if (audio && audio.paused){
-        const prevMuted = audio.muted;
-        audio.muted = true;
-        const p = audio.play();
-        if(p && p.catch) p.then(()=>{ try{ audio.pause(); audio.muted = prevMuted; }catch{} }).catch(()=>{ try{ audio.muted = prevMuted; }catch{} });
-        else { try{ audio.pause(); }catch{} audio.muted = prevMuted; }
+      // Usa el elemento real, no el shim, con un silencio breve
+      if (realAudioEl && realAudioEl.paused) {
+        const prevMuted = realAudioEl.muted;
+        const prevSrc = realAudioEl.src;
+        realAudioEl.muted = true;
+        // src silencioso de 0.1s si no hay src
+        if (!realAudioEl.src) realAudioEl.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==';
+        const p = realAudioEl.play();
+        if (p && p.then) p.then(()=>{ try{ realAudioEl.pause(); realAudioEl.muted = prevMuted; if(!prevSrc) realAudioEl.removeAttribute('src'); }catch{} }).catch(()=>{ try{ realAudioEl.muted = prevMuted; }catch{} });
+        else { try{ realAudioEl.pause(); }catch{} realAudioEl.muted = prevMuted; }
       }
     } catch {}
   };
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    unlockAudioSync();
+    unlockForSearch();
     doSearch(input.value.trim());
   });
 
