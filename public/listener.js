@@ -131,6 +131,30 @@
 
   const audio = new AudioShim(realAudioEl);
 
+  // ===== Reproducción nativa en el APK (Android) =====
+  // El teléfono recibe SOLO el audio del servidor (onrender.com) vía stream, sin
+  // tocar YouTube: así YouTube no puede bloquear nada en el móvil y la pantalla
+  // puede apagarse / abrir otra app sin que el audio se pause (suena en primer
+  // plano mediante un MediaPlayer nativo con wake lock).
+  const nativeMode = !!(window.AndroidBridge && window.AndroidBridge.updateTrack);
+  const streamCache = new Map();
+  const blockedNativeIds = new Set();
+  const absoluteUrl = (p) => (p && /^[a-z]+:\/\//i.test(p) ? p : (location.origin + p));
+  const resolveStreamUrl = async (id) => {
+    if (!id) return '';
+    if (streamCache.has(id)) return streamCache.get(id);
+    let url = '';
+    try {
+      const r = await fetch('/api/stream/' + encodeURIComponent(id) + '?raw=1');
+      if (r.ok) { const j = await r.json().catch(() => null); if (j && j.url) url = j.url; }
+    } catch (e) {}
+    if (!url) url = '/api/stream/' + encodeURIComponent(id); // fallback: el servidor transmite los bytes
+    streamCache.set(id, url);
+    return url;
+  };
+  let nativePlaying = true;
+  let lastMasterData = null;
+
   // ---- UI ----
   const elStation = $('#station');
   const elTitle = $('#song-title');
@@ -149,21 +173,24 @@
   let localGenre = 'pop';
   let localCount = 0;
   let playingJingle = false;
-  const blockedIds = new Set(); // videos bloqueados por YouTube (no se repiten)
+  const blockedIds = new Set(); // videos bloqueados por YouTube (no se repiten, modo web)
   const GENRES = ['pop', 'rock', 'reggaeton', 'musica latina', 'clasicos de los 80', 'exitos 2024'];
   const JINGLE = '/station-id.mp3'; // cortina "Estás escuchando Neon Music" entre temas
 
   const setIcon = () => { playBtn.textContent = audio.paused ? '▶' : '⏸'; };
+  const setIconNative = () => { playBtn.textContent = nativePlaying ? '⏸' : '▶'; };
   const spin = (on) => { if (vinyl) vinyl.classList.toggle('playing', on); };
 
-  audio.addEventListener('playing', () => { spin(true); setIcon(); userPaused = false; statusEl.textContent = ''; });
-  audio.addEventListener('pause', () => { spin(false); setIcon(); });
+  audio.addEventListener('playing', () => { if (nativeMode) return; spin(true); setIcon(); userPaused = false; statusEl.textContent = ''; });
+  audio.addEventListener('pause', () => { if (nativeMode) return; spin(false); setIcon(); });
   audio.addEventListener('ended', () => {
+    if (nativeMode) return; // en APK el avance lo maneja el reproductor nativo
     if (currentSource !== 'local') return;
     if (playingJingle) { playingJingle = false; playLocalNext(); }
     else { playJingle(); }
   });
   audio.addEventListener('error', () => {
+    if (nativeMode) return; // en APK el error lo maneja el reproductor nativo
     if (currentSource === 'local') {
       if (currentYtId && currentYtId !== JINGLE) blockedIds.add(currentYtId);
       statusEl.textContent = 'Bloqueado por YouTube · saltando al siguiente…';
@@ -173,10 +200,10 @@
     }
   });
 
-  const setTrack = (id, info) => {
+  const setTrack = async (id, info) => {
     currentYtId = id;
-    audio.src = 'yt:' + id;
-    audio.play().catch(() => {});
+    const t = info ? (info.title || 'NEON MUSIC') : 'NEON MUSIC';
+    const a = info ? (info.artist || '') : '';
     userPaused = false;
     playBtn.disabled = false; vol.disabled = false;
     if (info) {
@@ -185,14 +212,19 @@
       if (info.thumbnail) { elCover.src = info.thumbnail; elCover.style.display = 'block'; }
       else elCover.style.display = 'none';
     }
-    // Avisa al reproductor nativo (Android) para el Now Bar / controles de medios
+    // Stream en el servidor (yt-dlp) para que YouTube no bloquee nunca en el móvil.
+    const url = await resolveStreamUrl(id);
+    if (currentYtId !== id) return; // el tema ya cambió mientras resolvíamos
+    // Avisa al reproductor nativo (APK): título, artista y URL absoluta del stream.
     try {
       if (window.AndroidBridge && window.AndroidBridge.updateTrack) {
-        const t = info ? (info.title || 'NEON MUSIC') : 'NEON MUSIC';
-        const a = info ? (info.artist || '') : '';
-        window.AndroidBridge.updateTrack(t, a);
+        window.AndroidBridge.updateTrack(t, a, absoluteUrl(url) || '');
       }
     } catch (e) {}
+    if (nativeMode) return; // suena el MediaPlayer nativo; el WebView queda en silencio
+    // Web: reproducimos el stream directamente (sin embebido de YouTube).
+    audio.muted = false;
+    if (url) { audio.src = url; audio.play().catch(() => {}); }
   };
 
   // ---- modo master: sigue lo que el DJ está poniendo ----
@@ -202,6 +234,7 @@
       setTrack(d.id, d);
       elStation.textContent = (d.station && d.station.trim()) ? d.station.toUpperCase() : 'NEON MUSIC';
     }
+    if (nativeMode) return; // el reproductor nativo maneja play/pausa en el APK
     if (d.playing && audio.paused && !userPaused) { audio.play().catch(() => {}); }
     else if (!d.playing && !audio.paused) { audio.pause(); }
   };
@@ -253,8 +286,10 @@
     elArtist.textContent = '';
     elCover.style.display = 'none';
     spin(true);
-    audio.src = JINGLE; // modo archivo: usa el <audio> real
-    audio.play().catch(() => {});
+    const jurl = absoluteUrl(JINGLE);
+    try { if (window.AndroidBridge && window.AndroidBridge.updateTrack) window.AndroidBridge.updateTrack('Estás escuchando Neon Music', '', jurl); } catch (e) {}
+    if (nativeMode) return; // suena en el reproductor nativo
+    audio.muted = false; audio.src = JINGLE; audio.play().catch(() => {});
   };
 
   // ---- consulta el estado del master ----
@@ -264,6 +299,7 @@
       const d = await r.json();
       if (dot) dot.className = 'dot on';
       if (d && d.id) {
+        lastMasterData = d;
         followMaster(d);
       } else if (currentSource !== 'local') {
         startLocal();
@@ -274,9 +310,38 @@
     }
   };
 
+  // Llamados desde el reproductor nativo (APK) cuando un tema termina o falla.
+  window.__neonTrackEnded = () => {
+    if (currentSource === 'local') {
+      if (playingJingle) { playingJingle = false; playLocalNext(); }
+      else { playJingle(); }
+    }
+    // En modo master el poll enviará el siguiente tema cuando el DJ cambie.
+  };
+  window.__neonTrackError = () => {
+    if (currentSource === 'local') {
+      if (currentYtId && currentYtId !== JINGLE) blockedNativeIds.add(currentYtId);
+      if (playingJingle) { playingJingle = false; playLocalNext(); }
+      else { playJingle(); }
+    } else if (currentSource === 'master') {
+      if (currentYtId && currentYtId !== JINGLE) blockedNativeIds.add(currentYtId);
+      if (lastMasterData && lastMasterData.id && !blockedNativeIds.has(lastMasterData.id)) {
+        currentYtId = ''; followMaster(lastMasterData);
+      } else {
+        startLocal();
+      }
+    }
+  };
+
   // Play/Pausa: si está sonando, pausa. Si está pausado, reanuda y se sincroniza
   // con lo que Neon Music está emitiendo en este momento (master) o sigue la radio.
   playBtn.addEventListener('click', () => {
+    if (nativeMode) {
+      nativePlaying = !nativePlaying;
+      setIconNative();
+      try { if (window.AndroidBridge && window.AndroidBridge.setPlaying) window.AndroidBridge.setPlaying(nativePlaying); } catch (e) {}
+      return;
+    }
     if (!audio.paused) { audio.pause(); userPaused = true; return; }
     userPaused = false;
     if (lastData && lastData.id) {
@@ -292,6 +357,7 @@
   // Autoarranque: intenta sonar al cargar; si el navegador lo bloquea, el primer
   // toque en cualquier parte de la página lo libera (política de autoplay).
   const unlock = () => {
+    if (nativeMode) return;
     if (currentYtId && audio.paused && !userPaused) audio.play().catch(() => {});
     window.removeEventListener('pointerdown', unlock);
     window.removeEventListener('touchstart', unlock);
@@ -299,10 +365,19 @@
   window.addEventListener('pointerdown', unlock);
   window.addEventListener('touchstart', unlock);
 
-  vol.addEventListener('input', () => { audio.volume = vol.value / 100; vol.style.setProperty('--pct', vol.value + '%'); });
+  vol.addEventListener('input', () => {
+    vol.style.setProperty('--pct', vol.value + '%');
+    if (nativeMode) { try { if (window.AndroidBridge && window.AndroidBridge.setVolume) window.AndroidBridge.setVolume(parseInt(vol.value, 10) || 0); } catch (e) {} }
+    else audio.volume = vol.value / 100;
+  });
   vol.style.setProperty('--pct', '80%');
+  vol.value = 80;
   audio.volume = 0.8;
 
+  if (nativeMode) {
+    setIconNative();
+    try { if (window.AndroidBridge && window.AndroidBridge.setVolume) window.AndroidBridge.setVolume(80); } catch (e) {}
+  }
   setInterval(poll, 1500);
   poll();
 })();
