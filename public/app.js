@@ -2169,7 +2169,9 @@ const fuzzyCatalog = (query, limit = 8) => {
     results = list;
     searchMeta = meta;
     renderResults();
-    playJingleThen(() => playFrom(0, 'results', manual));
+    // FIX: reproducir SIN jingle en el gesto inicial para no perder la activación del usuario
+    // (el jingle se usa solo entre canciones via playWithJingle, donde la activación ya es sticky)
+    playFrom(0, 'results', manual);
   };
 
   // Regla 1 + 3: búsqueda tipo Lista de Reproducción. Si el backend la encuentra,
