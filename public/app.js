@@ -953,19 +953,22 @@ updatePlaylistCount();
       const res = await fetch('/api/autodj?' + params.toString());
       const data = await res.json();
       if (data.error || !Array.isArray(data.results)) return;
-      const have = new Set(results.map((r) => r.id));
+      // Alimenta la LISTA QUE SE ESTÁ REPRODUCIENDO (results o playlist), no una fija,
+      // para que el Auto-DJ agregue canciones relacionadas con la última búsqueda a lo que suena.
+      const list = listOf(activeSrc);
+      const have = new Set(list.map((r) => r.id).concat(results.map((r) => r.id)));
       let added = 0;
        for (const t of data.results) {
          if (have.has(t.id)) continue;
          if (blockedYt.has(t.id)) continue; // omitir los que YouTube bloquea en embed
          have.add(t.id);
-         results.push(t);
+         list.push(t);
          added++;
        }
       if (added) {
-        if (activeTab === 'results') renderResults();
+        renderActiveList();
         pushNativeQueue();
-        dbg('📻 Auto-DJ +' + added + ' temas (cola=' + results.length + ')');
+        dbg('📻 Auto-DJ +' + added + ' temas (cola=' + list.length + ')');
       }
     } catch (e) {
       dbg('📻 Auto-DJ err: ' + (e && e.message));
@@ -984,7 +987,7 @@ updatePlaylistCount();
     try {
       let guard = 0;
       while (autoDjOn && guard < 6) {
-        const ahead = results.length - 1 - current;
+        const ahead = listOf(activeSrc).length - 1 - current;
         if (ahead >= target) break;
         if (autoDjBusy) { await new Promise((r) => setTimeout(r, 300)); continue; }
         guard++;
@@ -2557,7 +2560,7 @@ const fuzzyCatalog = (query, limit = 8) => {
     pushPosition();
     if (audio.duration && isFinite(audio.duration) && audio.duration - audio.currentTime <= 15) warmNext();
     // Radio infinita: si queda poco en cola, anticipar la búsqueda para que nunca haya silencio
-    if (autoDjOn && results.length - 1 - current <= 3) ensureAutoDjBuffer(6);
+    if (autoDjOn && listOf(activeSrc).length - 1 - current <= 3) ensureAutoDjBuffer(6);
   });
   audio.addEventListener('seeked', () => {
     lastEvtAt = performance.now();
