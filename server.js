@@ -655,7 +655,7 @@ app.get('/api/search', async (req, res) => {
           out = out.concat(fbPool.slice(0, 25 - out.length).map(toResult));
         } catch {}
       }
-      // Último recurso: yt-dlp directo si aún <5 (evita lista vacía para salsa/merengue/pop)
+      // Último recurso: yt-dlp directo si aún <5 (garantiza salsa/merengue/pop)
       if (out.length < 5) {
         try {
           const ytdlRaw = await runYt(['--flat-playlist','--dump-json','--no-warnings','--socket-timeout','12',`ytsearch15:${q}`], 20000);
@@ -664,8 +664,9 @@ app.get('/api/search', async (req, res) => {
             try {
               const j = JSON.parse(line);
               if (!j.id || seen.has(j.id)) continue;
+              // Fallback permisivo: solo filtra duración 30-3600, no NON_MUSIC_RE estricto
               const t = { id: j.id, title: cleanTitle(j.title||''), channel: stripTopic(j.channel||j.uploader||''), duration: Number(j.duration)||0, views: Number(j.view_count)||0, thumbnail: `https://i.ytimg.com/vi/${j.id}/hq720.jpg` };
-              if (!isMusicVideo(t)) continue;
+              if (!t.duration || t.duration < 30 || t.duration > 3600) continue;
               seen.set(t.id, t);
               out.push(toResult(t));
               if (out.length >= 15) break;
