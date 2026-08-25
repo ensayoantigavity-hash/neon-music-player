@@ -45,7 +45,12 @@
     }
     .play:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
     .play:active { transform: scale(0.96); }
-    .vol { width: 150px; accent-color: var(--neon); }
+    .vol-wrap { display: flex; align-items: center; gap: 8px; }
+    .vol-icon { font-size: 18px; filter: drop-shadow(0 0 6px rgba(25,227,255,0.5)); }
+    .vol { width: 140px; height: 6px; border-radius: 6px; -webkit-appearance: none; appearance: none;
+      background: linear-gradient(90deg, var(--neon) var(--pct, 80%), #2a3550 var(--pct, 80%)); outline: none; cursor: pointer; }
+    .vol::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 8px var(--neon); cursor: pointer; }
+    .vol::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: var(--neon); cursor: pointer; }
     .vol:disabled { opacity: 0.4; }
     .status { font-size: 13px; color: #7d93b3; min-height: 18px; }
     #yt-host { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; overflow: hidden; }
@@ -60,7 +65,10 @@
     <div class="artist" id="song-artist"></div>
     <div class="controls">
       <button class="play" id="btn-play" disabled>▶</button>
-      <input class="vol" id="volume" type="range" min="0" max="100" value="80" disabled />
+      <div class="vol-wrap">
+        <span class="vol-icon">🔊</span>
+        <input class="vol" id="volume" type="range" min="0" max="100" value="80" disabled />
+      </div>
     </div>
     <div class="status" id="status"></div>
   </div>
