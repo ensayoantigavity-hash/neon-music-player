@@ -1,7 +1,7 @@
 import express from 'express';
 import { spawn, spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
-import { mkdirSync, readdirSync, statSync, existsSync, rmSync, renameSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, statSync, existsSync, rmSync, renameSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dgram from 'node:dgram';
@@ -12,7 +12,8 @@ import { Server } from 'socket.io';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = parseInt(process.env.PORT || '8765', 10);
-const YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
+// Render (runtime node) NO trae yt-dlp: se resuelve al arrancar (global -> python -> descarga oficial)
+let YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
 const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web,web_embedded,mweb')
   .split(',').map(s => s.trim()).filter(Boolean);
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || path.join(__dirname, 'Descargas');
@@ -20,6 +21,9 @@ mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
 function cookieArgs() {
   if (process.env.YTDLP_COOKIES_FILE) return ['--cookies', process.env.YTDLP_COOKIES_FILE];
+  // cookies.txt comprometido en la raíz del repo: se usa automáticamente en Render
+  const localCookies = path.join(__dirname, 'cookies.txt');
+  if (existsSync(localCookies)) return ['--cookies', localCookies];
   if (process.env.YTDLP_COOKIES_BROWSER) return ['--cookies-from-browser', process.env.YTDLP_COOKIES_BROWSER];
   return [];
 }
@@ -50,9 +54,44 @@ function parseContentRangeTotal(cr) {
 const streamCache = new Map(); // id -> { url, expires }
 const failedIds = new Map();   // id -> timestamp (bloqueados temporalmente)
 
-function runYt(args, timeoutMs = 90000) {
+// ---- resolución del binario yt-dlp en Render (sin apt-get) ----
+// 1) binario ya descargado  2) yt-dlp global  3) python -m yt_dlp
+// 4) descarga del binario standalone oficial de GitHub (una vez por deploy)
+function canRun(cmd, args) {
+  try {
+    const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 10000 });
+    return !r.error;
+  } catch { return false; }
+}
+async function ensureYtdlp() {
+  const LOCAL_BIN = path.join(__dirname, 'bin', 'yt-dlp');
+  if (existsSync(LOCAL_BIN)) { console.log('[neon] yt-dlp local listo'); return [LOCAL_BIN]; }
+  if (canRun('yt-dlp', ['--version'])) { console.log('[neon] yt-dlp global encontrado'); return ['yt-dlp']; }
+  if (canRun('python', ['-m', 'yt_dlp', '--version'])) { console.log('[neon] usando python -m yt_dlp'); return ['python', '-m', 'yt_dlp']; }
+  try {
+    mkdirSync(path.dirname(LOCAL_BIN), { recursive: true });
+    console.log('[neon] descargando binario yt-dlp standalone...');
+    const r = await fetch('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux', { redirect: 'follow' });
+    if (r.ok) {
+      writeFileSync(LOCAL_BIN, Buffer.from(await r.arrayBuffer()));
+      try { chmodSync(LOCAL_BIN, 0o755); } catch { /* noop */ }
+      console.log('[neon] yt-dlp descargado y activo');
+      return [LOCAL_BIN];
+    }
+  } catch (e) { console.log('[neon] fallo descarga yt-dlp: ' + e.message); }
+  return null;
+}
+const YTDLP_READY = ensureYtdlp().then(bin => {
+  if (!bin) { console.log('[neon] ATENCIÓN: sin yt-dlp, solo búsqueda Innertube'); return null; }
+  YTDLP_BIN = bin;
+  return bin;
+}).catch(() => null);
+
+async function runYt(args, timeoutMs = 90000) {
+  const bin = await YTDLP_READY;
+  if (!bin) throw new Error('yt-dlp no disponible en este servidor');
   return new Promise((resolve, reject) => {
-    const p = spawn(YTDLP_BIN[0], [...YTDLP_BIN.slice(1), ...args], {
+    const p = spawn(bin[0], [...bin.slice(1), ...args], {
       windowsHide: true,
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
