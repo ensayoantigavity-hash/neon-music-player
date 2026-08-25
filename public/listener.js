@@ -143,12 +143,31 @@
   const resolveStreamUrl = async (id) => {
     if (!id) return '';
     if (streamCache.has(id)) return streamCache.get(id);
+    // Intenta 3 modos: raw (URL directa) -> direct (302) -> proxy, para esquivar bloqueo por cliente/IP
     let url = '';
-    try {
-      const r = await fetch('/api/stream/' + encodeURIComponent(id) + '?raw=1');
-      if (r.ok) { const j = await r.json().catch(() => null); if (j && j.url) url = j.url; }
-    } catch (e) {}
-    if (!url) url = '/api/stream/' + encodeURIComponent(id); // fallback: el servidor transmite los bytes
+    const tryFetch = async (suffix) => {
+      try {
+        const r = await fetch('/api/stream/' + encodeURIComponent(id) + suffix);
+        if (r.status === 410) { streamCache.set(id, ''); return ''; } // bloqueado permanente, no reintentar
+        if (r.ok) {
+          const ct = r.headers.get('content-type') || '';
+          if (ct.includes('application/json')) {
+            const j = await r.json().catch(() => null);
+            if (j && j.url) return j.url;
+            if (j && j.blocked) return '';
+          } else if (r.ok) {
+            // proxy devuelve audio directo, usamos la URL del proxy
+            return '/api/stream/' + encodeURIComponent(id);
+          }
+        }
+      } catch (e) {}
+      return null;
+    };
+    url = await tryFetch('?raw=1');
+    if (url === '') { streamCache.set(id, ''); return ''; }
+    if (!url) url = await tryFetch('?direct=1');
+    if (!url) url = '/api/stream/' + encodeURIComponent(id);
+    // Si el proxy también daría 410, el audio fallará y el handler de error saltará al siguiente
     streamCache.set(id, url);
     return url;
   };
@@ -212,9 +231,20 @@
       if (info.thumbnail) { elCover.src = info.thumbnail; elCover.style.display = 'block'; }
       else elCover.style.display = 'none';
     }
-    // Stream en el servidor (yt-dlp) para que YouTube no bloquee nunca en el móvil.
+    // Stream en el servidor (yt-dlp) para que YouTube no bloquee embebido.
+    // Si el servidor responde 410/bloqueado, saltamos inmediato al siguiente sin pausar.
     const url = await resolveStreamUrl(id);
     if (currentYtId !== id) return; // el tema ya cambió mientras resolvíamos
+    if (!url) {
+      // Video bloqueado en todos los modos -> marcar y saltar sin mostrar bloqueo
+      if (id !== JINGLE) {
+        if (currentSource === 'local') blockedIds.add(id);
+        else blockedNativeIds.add(id);
+      }
+      if (currentSource === 'local') { playLocalNext(); return; }
+      if (currentSource === 'master') { masterGone().then(g=>{ if(g) startLocal(); }); return; }
+      return;
+    }
     // Avisa al reproductor nativo (APK): título, artista y URL absoluta del stream.
     try {
       if (window.AndroidBridge && window.AndroidBridge.updateTrack) {
@@ -222,9 +252,9 @@
       }
     } catch (e) {}
     if (nativeMode) return; // suena el MediaPlayer nativo; el WebView queda en silencio
-    // Web: reproducimos el stream directamente (sin embebido de YouTube).
+    // Web: reproducimos el stream directo (sin yt: embebido) para que no bloquee.
     audio.muted = false;
-    if (url) { audio.src = url; audio.play().catch(() => {}); }
+    audio.src = url; audio.play().catch(() => {});
   };
 
   // ---- modo master: sigue lo que el DJ está poniendo ----
