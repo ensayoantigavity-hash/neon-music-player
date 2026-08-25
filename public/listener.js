@@ -253,9 +253,11 @@
       }
     } catch (e) {}
     if (nativeMode) return; // suena el MediaPlayer nativo; el WebView queda en silencio
-    // Web: reproducimos el stream directo (sin yt: embebido) para que no bloquee.
-    audio.muted = false;
-    audio.src = url; audio.play().catch(() => {});
+    // Web: stream directo sin yt: embebido para que YouTube no bloquee.
+    // Autoplay automático: intenta muted primero (permitido sin gesto), luego desmutea.
+    audio.muted = true;
+    audio.src = url;
+    audio.play().then(()=>{ audio.muted = false; }).catch(()=>{ audio.muted = false; audio.play().catch(()=>{}); });
   };
 
   // ---- modo master: sigue lo que el DJ está poniendo ----
@@ -360,16 +362,26 @@
     }
   });
 
-  // Autoarranque: intenta sonar al cargar; si el navegador lo bloquea, el primer
-  // toque en cualquier parte de la página lo libera (política de autoplay).
+  // Autoplay 100% automático: intenta sonar muted al cargar (permitido sin gesto),
+  // luego desmutea. Si el navegador lo bloquea, el primer toque lo libera.
+  const tryAutoplay = () => {
+    if (nativeMode) return;
+    if (currentYtId && audio.paused && !userPaused) {
+      audio.muted = true;
+      audio.play().then(()=>{ audio.muted = false; }).catch(()=>{});
+    }
+  };
   const unlock = () => {
     if (nativeMode) return;
-    if (currentYtId && audio.paused && !userPaused) audio.play().catch(() => {});
+    tryAutoplay();
+    setTimeout(()=>{ audio.muted = false; }, 300);
     window.removeEventListener('pointerdown', unlock);
     window.removeEventListener('touchstart', unlock);
   };
   window.addEventListener('pointerdown', unlock);
   window.addEventListener('touchstart', unlock);
+  // Intento inmediato para autoplay automático sin interacción
+  setTimeout(tryAutoplay, 500);
 
   vol.addEventListener('input', () => {
     vol.style.setProperty('--pct', vol.value + '%');
