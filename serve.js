@@ -22,6 +22,10 @@ const PORT = process.env.PORT || 10000;
 let djConnected = false, currentDJSocket = null, autoDJProcess = null;
 let listeners = [];
 
+app.get('/escuchar', (req, res) => {
+  res.sendFile(path.resolve('public', 'listener.html'));
+});
+
 app.get('/radio/stream', (req, res) => {
   res.writeHead(200, {
     'Content-Type': 'audio/mpeg',
@@ -29,9 +33,9 @@ app.get('/radio/stream', (req, res) => {
     'Cache-Control': 'no-cache',
     'Connection': 'keep-alive'
   });
-  listeners.push(res);
+
   req.on('close', () => {
-    listeners = listeners.filter(l => l !== res);
+      listeners = listeners.filter(l => l !== res);
   });
 });
 
