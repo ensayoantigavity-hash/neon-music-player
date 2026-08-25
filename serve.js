@@ -109,6 +109,40 @@ function getYtdlp() {
   return ytdlpInflight;
 }
 
+// ---- PO Token provider (bgutil): evita el muro anti-bot de IPs de nube ----
+// Instala el paquete en runtime, arranca su servidor interno (puerto 4416) y
+// expone el directorio del plugin de yt-dlp. Si algo falla, todo sigue igual.
+let POT_DIR = null; // ruta del plugin para --plugin-dir
+async function ensurePotProvider() {
+  try {
+    // 1) instalar el paquete (silencioso; ya puede existir)
+    spawnSync('npm', ['install', 'bgutil-ytdlp-pot-provider@latest', '--no-audit', '--no-fund', '--loglevel=error'], {
+      cwd: __dirname, encoding: 'utf8', timeout: 120000,
+    });
+    const nm = path.join(__dirname, 'node_modules', 'bgutil-ytdlp-pot-provider');
+    // 2) localizar servidor compilado y carpeta del plugin yt-dlp
+    let serverJs = null, plugDir = null;
+    const walk = (dir, depth) => {
+      if (!dir || depth > 4 || !existsSync(dir)) return;
+      let ents = []; try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+      for (const e of ents) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          if (e.name === 'plugin' && existsSync(path.join(full, 'yt_dlp_bgutil_pot'))) plugDir = plugDir || full;
+          walk(full, depth + 1);
+        } else if (e.name === 'main.js' && /server|build/.test(full)) serverJs = serverJs || full;
+      }
+    };
+    walk(nm, 0);
+    if (!serverJs) return console.log('[neon] PO provider: servidor no encontrado');
+    // 3) arrancar servidor PO
+    const pot = spawn(process.execPath, [serverJs], { stdio: 'ignore', detached: false });
+    pot.on('error', () => {});
+    console.log('[neon] PO provider activo en 127.0.0.1:4416');
+    POT_DIR = plugDir;
+  } catch (e) { console.log('[neon] PO provider fallo: ' + e.message); }
+}
+
 async function runYt(args, timeoutMs = 90000) {
   const bin = await getYtdlp();
   if (!bin) throw new Error('yt-dlp no disponible en este servidor');
@@ -186,8 +220,9 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false, f
     '--retries', '2', '--extractor-retries', '3',
     '--extractor-args', `youtube:player_client=${order.join(',')};youtube:player_skip=webpage,configs`,
     '--extractor-args', 'youtubetab:skip=webpage',
-    `https://www.youtube.com/watch?v=${videoId}`,
   ];
+  if (POT_DIR) args.push('--plugin-dir', POT_DIR); // PO token provider (anti bot-wall en nube)
+  args.push(`https://www.youtube.com/watch?v=${videoId}`);
   const out = await runYt(args, timeoutMs);
   const url = seekUrl(out);
   if (!url) throw new Error('No se pudo resolver el stream de audio');
@@ -374,7 +409,8 @@ io.on('connection', (socket) => {
         }
     });
 });
-startAutoDJ();
+// PO provider en segundo plano (no bloquea arranque); luego arranca el Auto-DJ
+ensurePotProvider().finally(() => startAutoDJ());
 
 app.get('/api/ping', (req, res) => {
   res.json({
