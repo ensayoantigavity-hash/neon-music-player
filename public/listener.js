@@ -12,7 +12,7 @@
   ]);
   window.onYouTubeIframeAPIReady = () => { if (window.__ytResolve) window.__ytResolve(true); };
 
-  // ---- AudioShim: copia fiel del reproductor original (este es el que te funciona) ----
+  // ---- AudioShim: copia fiel del reproductor original (el que te funciona) ----
   class AudioShim {
     constructor(real) {
       this.real = real;
@@ -59,7 +59,7 @@
           videoId: this._ytId,
           playerVars: { autoplay: 1, controls: 0, disablekb: 1, modestbranding: 1, rel: 0, fs: 0, playsinline: 1 },
           events: {
-            onReady: () => { this._ready = true; this._dispatch('loadedmetadata'); this._dispatch('canplay'); },
+            onReady: () => { this._ready = true; try { this._yt.setVolume(this._volume * 100); } catch (e) {} this._dispatch('loadedmetadata'); this._dispatch('canplay'); },
             onStateChange: (e) => this._onState(e),
             onError: (e) => { const c = (e && e.data) || 1; this._error = { code: c, message: 'YouTube bloqueó este video para reproducción embebida (dueño, región o copyright)' }; this._dispatch('error'); },
           },
@@ -131,7 +131,7 @@
 
   const audio = new AudioShim(realAudioEl);
 
-  // ---- UI del listener (play + volumen, sigue al master) ----
+  // ---- UI ----
   const elStation = $('#station');
   const elTitle = $('#song-title');
   const elArtist = $('#song-artist');
@@ -142,57 +142,105 @@
   const vinyl = $('#vinyl');
   const statusEl = $('#status');
 
-  let currentId = '';
-  let localPaused = false; // el amigo pausó manualmente
-  let lastData = { id: '', title: '', artist: '', thumbnail: '', playing: false, station: '' };
+  let currentSource = 'idle'; // 'master' | 'local'
+  let currentYtId = '';
+  let userPaused = false;
+  let localQueue = [];
+  let localGenre = 'pop';
+  let localCount = 0;
+  const GENRES = ['pop', 'rock', 'reggaeton', 'musica latina', 'clasicos de los 80', 'exitos 2024'];
 
   const setIcon = () => { playBtn.textContent = audio.paused ? '▶' : '⏸'; };
   const spin = (on) => { if (vinyl) vinyl.classList.toggle('playing', on); };
 
-  audio.addEventListener('playing', () => { spin(true); setIcon(); localPaused = false; statusEl.textContent = ''; });
+  audio.addEventListener('playing', () => { spin(true); setIcon(); userPaused = false; statusEl.textContent = ''; });
   audio.addEventListener('pause', () => { spin(false); setIcon(); });
-  audio.addEventListener('error', () => { statusEl.textContent = 'Este tema está bloqueado por YouTube; esperando el siguiente…'; });
+  audio.addEventListener('ended', () => { if (currentSource === 'local') playLocalNext(); });
+  audio.addEventListener('error', () => { if (currentSource === 'master') statusEl.textContent = 'Este tema está bloqueado por YouTube; esperando el siguiente…'; });
 
-  // Refleja el estado del master: cambia de tema y obedece play/pausa del DJ.
-  const applyMaster = () => {
-    if (!lastData.id) { playBtn.disabled = true; vol.disabled = true; return; }
-    if (lastData.id !== currentId) {
-      currentId = lastData.id;
-      localPaused = false;
-      audio.src = 'yt:' + lastData.id;
-      audio.play().catch(() => {});
-      playBtn.disabled = false; vol.disabled = false;
+  const setTrack = (id, info) => {
+    currentYtId = id;
+    audio.src = 'yt:' + id;
+    audio.play().catch(() => {});
+    userPaused = false;
+    playBtn.disabled = false; vol.disabled = false;
+    if (info) {
+      elTitle.textContent = info.title || 'NEON MUSIC';
+      elArtist.textContent = info.artist || '';
+      if (info.thumbnail) { elCover.src = info.thumbnail; elCover.style.display = 'block'; }
+      else elCover.style.display = 'none';
     }
-    if (lastData.playing && audio.paused && !localPaused) { audio.play().catch(() => {}); }
-    else if (!lastData.playing && !audio.paused) { audio.pause(); }
   };
 
-  const render = (d) => {
-    elStation.textContent = (d.station && d.station.trim()) ? d.station.toUpperCase() : 'NEON MUSIC';
-    elTitle.textContent = d.id ? (d.title || 'NEON MUSIC') : 'NEON MUSIC';
-    elArtist.textContent = d.id ? (d.artist || '') : '';
-    if (d.thumbnail) { elCover.src = d.thumbnail; elCover.style.display = 'block'; }
-    else elCover.style.display = 'none';
+  // ---- modo master: sigue lo que el DJ está poniendo ----
+  const followMaster = (d) => {
+    if (currentSource !== 'master' || currentYtId !== d.id) {
+      currentSource = 'master';
+      setTrack(d.id, d);
+      elStation.textContent = (d.station && d.station.trim()) ? d.station.toUpperCase() : 'NEON MUSIC';
+    }
+    if (d.playing && audio.paused && !userPaused) { audio.play().catch(() => {}); }
+    else if (!d.playing && !audio.paused) { audio.pause(); }
   };
 
+  // ---- modo local: radio propia cuando nadie transmite ----
+  const fetchBatch = async (genre) => {
+    try {
+      const r = await fetch('/api/search?q=' + encodeURIComponent(genre) + '&type=playlist');
+      const j = await r.json();
+      if (j && Array.isArray(j.results) && j.results.length) return j.results;
+    } catch (e) {}
+    return [];
+  };
+
+  const playLocalNext = async () => {
+    if (currentSource !== 'local') return;
+    if (!localQueue.length) {
+      statusEl.textContent = 'Cargando radio…';
+      let batch = await fetchBatch(localGenre);
+      if (!batch.length) {
+        localGenre = GENRES[(GENRES.indexOf(localGenre) + 1) % GENRES.length];
+        batch = await fetchBatch(localGenre);
+      }
+      if (currentSource !== 'local') return;
+      if (batch.length) localQueue = batch; else { statusEl.textContent = 'Sin conexión con la radio…'; return; }
+    }
+    const t = localQueue.shift();
+    if (!t || !t.id) return;
+    elStation.textContent = 'NEON MUSIC · RADIO';
+    setTrack(t.id, t);
+    statusEl.textContent = '';
+    localCount++;
+    if (localCount % 12 === 0) localGenre = GENRES[(GENRES.indexOf(localGenre) + 1) % GENRES.length];
+  };
+
+  const startLocal = async () => {
+    currentSource = 'local';
+    elStation.textContent = 'NEON MUSIC · RADIO';
+    await playLocalNext();
+  };
+
+  // ---- consulta el estado del master ----
   const poll = async () => {
     try {
       const r = await fetch('/api/nowplaying');
       const d = await r.json();
       if (dot) dot.className = 'dot on';
-      lastData = d || lastData;
-      render(d);
-      applyMaster();
+      if (d && d.id) {
+        followMaster(d);
+      } else if (currentSource !== 'local') {
+        startLocal();
+      }
     } catch (e) {
       if (dot) dot.className = 'dot off';
-      statusEl.textContent = 'Sin conexión con la radio…';
+      if (currentSource !== 'local') statusEl.textContent = 'Sin conexión con la radio…';
     }
   };
 
   playBtn.addEventListener('click', () => {
-    if (!currentId) return;
-    if (audio.paused) { audio.play().catch(() => {}); localPaused = false; }
-    else { audio.pause(); localPaused = true; }
+    if (!currentYtId) return;
+    if (audio.paused) { audio.play().catch(() => {}); userPaused = false; }
+    else { audio.pause(); userPaused = true; }
   });
 
   vol.addEventListener('input', () => { audio.volume = vol.value / 100; vol.style.setProperty('--pct', vol.value + '%'); });
