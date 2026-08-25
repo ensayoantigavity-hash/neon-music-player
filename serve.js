@@ -23,11 +23,18 @@ mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
 function cookieArgs() {
   if (process.env.YTDLP_COOKIES_FILE) return ['--cookies', process.env.YTDLP_COOKIES_FILE];
-  // cookies.txt comprometido en la raíz del repo: se usa automáticamente en Render
+  // cookies.txt comprometido en la raiz del repo: se usa automaticamente en Render
   const localCookies = path.join(__dirname, 'cookies.txt');
   if (existsSync(localCookies)) return ['--cookies', localCookies];
   if (process.env.YTDLP_COOKIES_BROWSER) return ['--cookies-from-browser', process.env.YTDLP_COOKIES_BROWSER];
   return [];
+}
+
+// Proxy opcional para yt-dlp (residencial): setea YTDLP_PROXY en Render y todo lo usa solo.
+// Ej: YTDLP_PROXY=http://usuario:pass@proxy-pais:puerto
+function proxyArgs() {
+  const px = process.env.YTDLP_PROXY;
+  return px ? ['--proxy', px] : [];
 }
 
 // ---- deteccion de ffmpeg (requerido para convertir a mp3) ----
@@ -215,6 +222,7 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false, f
 
   const args = [
     ...cookieArgs(),
+    ...proxyArgs(),
     '--no-playlist', '-f', fmt, '-g', '--no-warnings',
     '--socket-timeout', '15',
     '--retries', '2', '--extractor-retries', '3',
