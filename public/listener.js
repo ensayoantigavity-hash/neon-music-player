@@ -185,6 +185,14 @@
       if (info.thumbnail) { elCover.src = info.thumbnail; elCover.style.display = 'block'; }
       else elCover.style.display = 'none';
     }
+    // Avisa al reproductor nativo (Android) para el Now Bar / controles de medios
+    try {
+      if (window.AndroidBridge && window.AndroidBridge.updateTrack) {
+        const t = info ? (info.title || 'NEON MUSIC') : 'NEON MUSIC';
+        const a = info ? (info.artist || '') : '';
+        window.AndroidBridge.updateTrack(t, a);
+      }
+    } catch (e) {}
   };
 
   // ---- modo master: sigue lo que el DJ está poniendo ----
