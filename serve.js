@@ -300,19 +300,29 @@ async function streamOneToListeners(id) {
 async function autoDjLoop() {
     while (!djConnected) {
         let ids = [];
+        const seed = FALLBACK_SEEDS[Math.floor(Math.random() * FALLBACK_SEEDS.length)];
+        // 1) Innertube directo (rapido, sin yt-dlp)
         try {
-            const seed = FALLBACK_SEEDS[Math.floor(Math.random() * FALLBACK_SEEDS.length)];
-            console.log('[neon] Auto-DJ buscando: ' + seed);
-            const out = await runYt([
-                '--flat-playlist', '--dump-json', '--no-warnings',
-                '--match-filter', '!is_live',
-                `ytsearch6:${seed}`
-            ], 45000);
-            ids = out.split('\n').filter(l => l.trim().startsWith('{'))
-                .map(l => { try { return JSON.parse(l).id; } catch { return null; } })
-                .filter(Boolean);
-        } catch (e) {
-            radioStats.ultimoError = 'busqueda: ' + e.message;
+            console.log('[neon] Auto-DJ buscando (innertube): ' + seed);
+            const raw = await ytSearchPages(seed + ' musica', 8, 1);
+            ids = raw.filter(t => t && t.id && (!t.duration || (t.duration >= 40 && t.duration <= 3600)))
+                     .map(t => t.id);
+        } catch { /* noop */ }
+        // 2) Fallback yt-dlp flat-playlist
+        if (!ids.length) {
+            try {
+                console.log('[neon] Auto-DJ buscando (ytdlp): ' + seed);
+                const out = await runYt([
+                    '--flat-playlist', '--dump-json', '--no-warnings',
+                    '--match-filter', '!is_live',
+                    `ytsearch6:${seed}`
+                ], 45000);
+                ids = out.split('\n').filter(l => l.trim().startsWith('{'))
+                    .map(l => { try { return JSON.parse(l).id; } catch { return null; } })
+                    .filter(Boolean);
+            } catch (e) {
+                radioStats.ultimoError = 'busqueda: ' + e.message;
+            }
         }
         if (djConnected) return;
         for (const id of ids) {
