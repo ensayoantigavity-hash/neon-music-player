@@ -223,6 +223,9 @@ let currentDJSocket = null;
 let autoDJProcess = null;
 let listeners = [];
 
+// Telemetria del Auto-DJ (diagnostico remoto via /api/radiostatus)
+const radioStats = { arranques: 0, salidas: 0, ultimoError: '', bytesEnviados: 0 };
+
 app.get('/radio/stream', (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Transfer-Encoding', 'chunked');
@@ -257,17 +260,26 @@ async function startAutoDJ() {
         return;
     }
     autoDJProcess = p;
+    radioStats.arranques++;
     // SIN este handler, un ENOENT emite 'error' sin listener y TUMBA el servidor
     p.on('error', (err) => {
         console.log('[neon] Auto-DJ child error:', err.message);
+        radioStats.ultimoError = err.message;
         if (autoDJProcess === p) autoDJProcess = null;
         if (!djConnected) setTimeout(startAutoDJ, 10000);
     });
+    p.stderr.on('data', (d) => {
+        const s = d.toString().trim().split('\n').pop();
+        if (s) radioStats.ultimoError = s.slice(0, 200);
+    });
     p.stdout.on('data', (chunk) => {
+        radioStats.bytesEnviados += chunk.length;
         if (djConnected) { stopAutoDJ(); return; }
         for (const listener of listeners) { try { listener.write(chunk); } catch {} }
     });
-    p.on('close', () => {
+    p.on('close', (code) => {
+        radioStats.salidas++;
+        radioStats.ultimoError = 'exit code ' + code + ' | ' + radioStats.ultimoError;
         if (autoDJProcess === p) autoDJProcess = null;
         if (!djConnected) setTimeout(startAutoDJ, 5000);
     });
@@ -320,6 +332,7 @@ app.get('/api/radiostatus', (req, res) => {
     oyentes: listeners.length,
     binarioYtdlp: existsSync(LOCAL_BIN) ? LOCAL_BIN : 'no descargado',
     cookiesOk: existsSync(COOKIES_LOCAL),
+    ...radioStats,
   });
 });
 
