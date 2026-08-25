@@ -17,7 +17,7 @@ let YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
 // Cadena efectiva: la del entorno + clientes resistentes al bot-check SIEMPRE incluidos
 const _envChain = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web,web_embedded,mweb')
   .split(',').map(s => s.trim()).filter(Boolean);
-const CLIENT_CHAIN = [...new Set([..._envChain, 'tv', 'ios', 'android_vr', 'tv_simply', 'mweb'])];
+const CLIENT_CHAIN = [...new Set(['web_safari', ..._envChain, 'tv', 'ios', 'android_vr', 'tv_simply', 'mweb'])];
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || path.join(__dirname, 'Descargas');
 mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
