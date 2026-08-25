@@ -216,11 +216,11 @@ function getPlayableStream(videoId) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) streamCache.delete(videoId);
-        // intento0: cadena movil tv-first | intento1: web con cookies | intento2: invertida
+        // intento0: cadena movil tv-first | intento1: web/mweb con cookies | intento2: invertida
         let clients;
         if (attempt === 0) clients = CLIENT_CHAIN;
-        else if (attempt === 1) clients = ['web', 'mweb', 'web_embedded'];
-        else clients = [...CLIENT_CHAIN].reverse();
+        else if (attempt === 1) clients = ['web', 'mweb'];
+        else clients = ['android', 'ios'];
         const url = await resolveStream(videoId, { clients, force: attempt > 0 });
         // Sin probe para velocidad: la URL directa de googlevideo es valida si yt-dlp la dio
         if (url && url.startsWith('http')) return url;
