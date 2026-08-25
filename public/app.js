@@ -1118,7 +1118,7 @@ updatePlaylistCount();
         audio.play().then(() => setEngine(true)).catch(() => {
           playIntent = true;
           setPlaying({ playing: false });
-          showToast('▶ Toca el botón de reproducir', true);
+          dbg('autoplay bloqueado en startPlayback (modo raw)');
         });
       };
       dbg(`→ play[2] raw ${srcUrl(2)}`);
@@ -1154,11 +1154,11 @@ updatePlaylistCount();
 
     if (autoPlay) {
       audio.play().then(() => setEngine(true)).catch(() => {
-        // Autoplay bloqueado por la política del navegador (Safari/WebView): se muestra
-        // pausado y se reintenta con el próximo gesto del usuario (resumeAudio).
+        // Si el navegador bloquea fuera del gesto, queda en playIntent y se reanuda
+        // solo con el próximo gesto (visibilitychange/resume). Sin toast bloqueante.
         playIntent = true;
         setPlaying({ playing: false });
-        showToast('▶ Toca el botón de reproducir', true);
+        dbg('autoplay bloqueado en playFrom tail');
       });
     }
   };
@@ -1200,7 +1200,7 @@ updatePlaylistCount();
     audio.play().then(() => setEngine(true)).catch(() => {
       playIntent = true;
       setPlaying({ playing: false });
-      showToast('▶ Toca el botón de reproducir', true);
+      dbg('autoplay bloqueado en playFile');
     });
   };
 
@@ -2346,9 +2346,25 @@ const fuzzyCatalog = (query, limit = 8) => {
   };
 
   // ---------- eventos de audio ----------
+  // Desbloqueo síncrono para autoplay: debe ejecutarse DENTRO del gesto del usuario
+  // antes del await fetch de la búsqueda, si no el play() posterior pierde la activación.
+  const unlockAudioSync = () => {
+    try {
+      ensureAudioGraph();
+      if (window.AudioContext && actx && actx.state === 'suspended') try{ actx.resume(); }catch{}
+      // Intento silencioso dentro del gesto para ganar sticky activation
+      if (audio && audio.paused){
+        const prevMuted = audio.muted;
+        audio.muted = true;
+        const p = audio.play();
+        if(p && p.catch) p.then(()=>{ try{ audio.pause(); audio.muted = prevMuted; }catch{} }).catch(()=>{ try{ audio.muted = prevMuted; }catch{} });
+        else { try{ audio.pause(); }catch{} audio.muted = prevMuted; }
+      }
+    } catch {}
+  };
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    ensureAudioGraph();
+    unlockAudioSync();
     doSearch(input.value.trim());
   });
 
