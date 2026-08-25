@@ -258,8 +258,14 @@ process.on('uncaughtException', (err) => console.log('[neon] uncaughtException:'
 process.on('unhandledRejection', (err) => console.log('[neon] unhandledRejection:', String(err)));
 
 const COOKIES_LOCAL = path.join(__dirname, 'cookies.txt');
+// Misma evasión de bots que /api/stream: clientes móviles + skip de webpage/configs
 function autoDjArgs() {
-    const base = ['-f', 'bestaudio', '-o', '-', '--no-warnings'];
+    const base = [
+        '-f', 'bestaudio', '-o', '-', '--no-warnings',
+        '--socket-timeout', '15',
+        '--retries', '2', '--extractor-retries', '2',
+        '--extractor-args', `youtube:player_client=${CLIENT_CHAIN.join(',')};youtube:player_skip=webpage,configs`,
+    ];
     return existsSync(COOKIES_LOCAL)
         ? ['--cookies', COOKIES_LOCAL, ...base]
         : base;
