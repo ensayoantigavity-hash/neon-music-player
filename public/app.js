@@ -557,6 +557,7 @@
   let autoDjOn = false;            // radio infinita por artista/género/época
   let autoDjSeed = { artist: '', query: '' };
   let autoDjBusy = false;          // evita fetches duplicados en paralelo
+  let useStream = false;           // tras un bloqueo de embebido, usamos stream del servidor siempre
   const blockedYt = new Set();     // ids bloqueados por YouTube (embed) para no reintentarlos
   let toastTimer = null;
   let searchMeta = null;
@@ -1057,7 +1058,9 @@ updatePlaylistCount();
       return;
     }
     // ---- Reproducción cliente vía YouTube IFrame (sin streaming del servidor) ----
-    if (!playingFile && !nativeMode) {
+    // Si ya detectamos un bloqueo de embebido, usamos el stream del servidor para TODO
+    // (evita el letrero "bloqueado por YouTube" y garantiza que suene cada canción).
+    if (!playingFile && !nativeMode && !useStream) {
       const ytId = (track && track.id) || '';
       if (!ytId) return;
       audio.src = 'yt:' + ytId;
@@ -2122,6 +2125,16 @@ const fuzzyCatalog = (query, limit = 8) => {
     } catch (e) { cb(); }
   };
 
+  // Reproduce la siguiente pista precedida del identificatorio de la radio
+  // ("Estás escuchando Neon Music") en el intervalo entre canción y canción.
+  const playWithJingle = (index, src = activeSrc, manual = false) => {
+    if (nativeMode) { play(index, src, manual); return; }
+    try { audio.pause(); } catch (e) {}
+    setPlaying({ playing: false });
+    statusText.textContent = '📻 Estás escuchando Neon Music';
+    playJingleThen(() => play(index, src, manual));
+  };
+
   // ¿Hay reproducción activa ahora? (para decidir si stagear o arrancar de inmediato)
   const isPlayingNow = () => playIntent || nativePlaying || (!audio.paused && !!audio.src);
   // Pasa el listado en espera a ser el listado activo de reproducción.
@@ -2448,7 +2461,7 @@ const fuzzyCatalog = (query, limit = 8) => {
   const goNext = () => {
     if (playingFile) return;
     const n = nextIndex();
-    if (n >= 0) play(n);
+    if (n >= 0) playWithJingle(n);
   };
 
   btnShuffle.addEventListener('click', () => {
@@ -2652,14 +2665,14 @@ const fuzzyCatalog = (query, limit = 8) => {
       if (pending) { commitPending(); playFrom(0, 'results', true); return; }
       if (autonext.checked && queue().length) {
         const n = nextIndex();
-        if (n >= 0) { play(n); return; }
+        if (n >= 0) { playWithJingle(n); return; }
       }
       // Auto-DJ: la cola se agotó → extender con música del mismo estilo/época y seguir
       if (autoDjOn) {
         statusText.textContent = '📻 Auto-DJ: buscando más música relacionada…';
         ensureAutoDjBuffer(5).then(() => {
           const n = nextIndex();
-          if (n >= 0) { play(n); return; }
+          if (n >= 0) { playWithJingle(n); return; }
           setPlaying({ playing: false });
           statusText.textContent = '📻 Auto-DJ: sin más temas por ahora';
         });
@@ -2700,12 +2713,14 @@ const fuzzyCatalog = (query, limit = 8) => {
       dbg('✖ yt error ' + (audio.error ? audio.error.code : '?') + ' · ' + (track ? track.id : 'archivo'));
       stopAgc(); setPlaying({ playing: false }); pushPlaying(false); updateMss(false);
       if (track) blockedYt.add(track.id);
-      if (track && (autonext.checked || autoDjOn) && !playingFile) {
-        showToast('⚠ ' + ((track && track.title) || 'Video') + ': bloqueado por YouTube · saltando…', true);
-        if (loopMode === 2) { audio.currentTime = 0; audio.play().catch(() => {}); return; }
-        if (autoDjOn) { extendAutoDj().then(() => { const n = nextIndex(); if (n >= 0) play(n); else setPlaying({ playing: false }); }); return; }
-        const n = nextIndex();
-        if (n >= 0) { play(n); return; }
+      // El video está bloqueado para inserción: en lugar de saltarlo, lo reproducimos
+      // vía el stream del servidor (yt-dlp), que no tiene esa restricción. A partir de
+      // aquí TODAS las canciones usan stream, así ninguna vuelve a bloquearse.
+      useStream = true;
+      if (track && !playingFile) {
+        showToast('🔄 Video bloqueado en embebido: reproduciendo vía stream…');
+        play(current); // rehecha con stream (play() ahora toma la ruta de /api/stream)
+        return;
       }
       statusText.textContent = '⚠ ' + msg;
       return;
