@@ -613,6 +613,11 @@ app.get('/escuchar', (req, res) => {
   res.sendFile(path.resolve('public', 'listener.html'));
 });
 
+// Copia mini del reproductor (solo Play + Volumen), mismo stream en vivo
+app.get('/mini', (req, res) => {
+  res.sendFile(path.resolve('public', 'mini.html'));
+});
+
 // ---- proxy de im+ï¿½genes (mismo origen para leer el color v+ï¿½a <canvas>) ----
 app.get('/api/img', async (req, res) => {
   const u = String(req.query.u || '');
