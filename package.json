@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Reproductor de audio autonomo: busca musica en la web y la reproduce sin anuncios",
   "type": "module",
-  "main": "server.js",
+  "main": "serve.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node serve.js"
   },
   "dependencies": {
     "express": "^4.21.0",
