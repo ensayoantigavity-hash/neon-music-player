@@ -558,7 +558,7 @@
   let loopMode = 0; // 0 = sin repetición, 1 = repetir lista, 2 = repetir una canción
   let shuffleOn = false;
   let shuffleOrder = []; // índices pendientes de reproducir en modo aleatorio
-  let autoDjOn = false;            // radio infinita por artista/género/época
+  let autoDjOn = true;             // radio infinita por artista/género/época (siempre encendida)
   let autoDjSeed = { artist: '', query: '' };
   let autoDjBusy = false;          // evita fetches duplicados en paralelo
   let useStream = false;           // tras un bloqueo de embebido, usamos stream del servidor siempre
@@ -2510,6 +2510,9 @@ const fuzzyCatalog = (query, limit = 8) => {
       ensureAutoDjBuffer(8);
     }
   });
+  // El Auto-DJ arranca ENCENDIDO por defecto y cumple su función (radio infinita
+  // de música relacionada con la última búsqueda o el tema actual).
+  if (btnAutodj) btnAutodj.classList.toggle('on', autoDjOn);
 
   const btnShare = $('#btn-share');
   btnShare.addEventListener('click', async () => {
@@ -2944,7 +2947,7 @@ const fuzzyCatalog = (query, limit = 8) => {
     const q = params.get('q');
     if (q) {
       input.value = q;
-      doSearch(q); // búsqueda normal, Auto-DJ apagado
+      doSearch(q); // búsqueda normal (el Auto-DJ queda encendido por defecto)
     }
   })();
 })();
