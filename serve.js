@@ -383,12 +383,25 @@ app.get('/api/ping', (req, res) => {
 // Estado interno de la radio (diagnostico en vivo)
 app.get('/api/radiostatus', (req, res) => {
   const LOCAL_BIN = path.join(__dirname, 'bin', 'yt-dlp');
+  // Valida las cookies: deben existir entradas de dominio .youtube.com
+  let ytCookies = [];
+  if (existsSync(COOKIES_LOCAL)) {
+    try {
+      ytCookies = readFileSync(COOKIES_LOCAL, 'utf8').split(/\r?\n/)
+        .filter(l => l.trim() && !l.startsWith('#'))
+        .map(l => l.split('\t'))
+        .filter(p => p.length >= 6 && /\.youtube\.com$/i.test(p[0].trim()))
+        .map(p => p[5]);
+    } catch { /* noop */ }
+  }
   res.json({
     djConnected,
     autoDjActivo: !!autoDJProcess,
     oyentes: listeners.length,
     binarioYtdlp: existsSync(LOCAL_BIN) ? LOCAL_BIN : 'no descargado',
     cookiesOk: existsSync(COOKIES_LOCAL),
+    cookiesYoutube: ytCookies.length,
+    cookiesNombres: [...new Set(ytCookies)].slice(0, 10),
     ...radioStats,
   });
 });
