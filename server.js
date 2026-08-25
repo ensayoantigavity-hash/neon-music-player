@@ -388,7 +388,7 @@ async function djCollect(seed) {
   }
   const dj = Array.from(seen.values());
   jitterSort(dj);
-  return dj.slice(0, 60).map(toResult);
+  return dj.slice(0, 80).map(toResult);
 }
 
 app.get('/api/autodj', async (req, res) => {
@@ -412,7 +412,7 @@ app.get('/api/autodj', async (req, res) => {
           t.channel = stripTopic(t.channel);
           pool.push(toResult(t));
         }
-        out = out.concat(pool.slice(0, 30));
+        out = out.concat(pool.slice(0, 40));
       } catch { /* noop */ }
     }
     // pre-resolver el primer stream (arranque rápido, como en /api/search)

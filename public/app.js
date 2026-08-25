@@ -973,6 +973,27 @@ updatePlaylistCount();
     }
   };
 
+  // Rellena la cola de forma encadenada para que la radio NUNCA se quede muda:
+  // mientras el Auto-DJ esté ON y queden pocos temas por delante, sigue buscando
+  // música relacionada con la última búsqueda hasta alcanzar el colchón deseado.
+  let autoDjFilling = false;
+  const ensureAutoDjBuffer = async (target = 6) => {
+    if (!autoDjOn || autoDjFilling) return;
+    autoDjFilling = true;
+    try {
+      let guard = 0;
+      while (autoDjOn && guard < 6) {
+        const ahead = results.length - 1 - current;
+        if (ahead >= target) break;
+        if (autoDjBusy) { await new Promise((r) => setTimeout(r, 300)); continue; }
+        guard++;
+        await extendAutoDj();
+      }
+    } finally {
+      autoDjFilling = false;
+    }
+  };
+
   // ---------- reproduccion ----------
   const playFrom = (index, src = activeSrc, manual = false) => {
     const list = listOf(src);
@@ -2077,6 +2098,9 @@ const fuzzyCatalog = (query, limit = 8) => {
     if (ERA_RE.test(t) || PLAYLIST_HINTS_RE.test(t)) return { type: 'playlist' };
     const g = smartGenre(t);
     if (g) return { type: 'genre', genre: g };
+    // Frase natural (varias palabras): interpretarla como una lista de reproducción,
+    // tal como YouTube entiende "clasicos de los 80" y arma una colección de canciones.
+    if (t.split(/\s+/).length >= 2) return { type: 'playlist' };
     return { type: 'none' };
   };
   // Regla 2: concatenar términos de relevancia en segundo plano (género → "exitos de la historia").
@@ -2450,12 +2474,17 @@ const fuzzyCatalog = (query, limit = 8) => {
     btnAutodj.classList.toggle('on', autoDjOn);
     showToast(autoDjOn ? '📻 Auto-DJ activado: radio infinita por estilo y época' : '📻 Auto-DJ desactivado');
     if (autoDjOn) {
-      const t = (!playingFile && current >= 0) ? listOf(activeSrc)[current] : null;
-      if (t && !autoDjSeed.artist && !autoDjSeed.query) {
-        autoDjSeed = { artist: (t.artist || t.channel || '').trim(), query: lastQuery || (t.title || '').trim() };
+      // Sembrar la radio con la ÚLTIMA búsqueda (o el tema actual si no hubo búsqueda),
+      // para que el Auto-DJ busque música relacionada de inmediato.
+      const lastQ = (lastQuery || '').trim();
+      if (lastQ) autoDjSeed = { artist: '', query: lastQ };
+      else {
+        const t = (!playingFile && current >= 0) ? listOf(activeSrc)[current] : null;
+        if (t) autoDjSeed = { artist: (t.artist || t.channel || '').trim(), query: (t.title || '').trim() };
       }
-      if (!autoDjSeed.artist && !autoDjSeed.query) autoDjSeed = { artist: '', query: lastQuery || input.value.trim() };
-      extendAutoDj();
+      statusText.textContent = '📻 Auto-DJ: buscando música relacionada con "' + (autoDjSeed.query || autoDjSeed.artist) + '"…';
+      // Reacción inmediata: llenar el colchón de temas ahora mismo (nunca silencio).
+      ensureAutoDjBuffer(8);
     }
   });
 
@@ -2515,7 +2544,7 @@ const fuzzyCatalog = (query, limit = 8) => {
     pushPosition();
     if (audio.duration && isFinite(audio.duration) && audio.duration - audio.currentTime <= 15) warmNext();
     // Radio infinita: si queda poco en cola, anticipar la búsqueda para que nunca haya silencio
-    if (autoDjOn && !autoDjBusy && results.length - 1 - current <= 2) extendAutoDj();
+    if (autoDjOn && results.length - 1 - current <= 3) ensureAutoDjBuffer(6);
   });
   audio.addEventListener('seeked', () => {
     lastEvtAt = performance.now();
@@ -2627,8 +2656,8 @@ const fuzzyCatalog = (query, limit = 8) => {
       }
       // Auto-DJ: la cola se agotó → extender con música del mismo estilo/época y seguir
       if (autoDjOn) {
-        statusText.textContent = '📻 Auto-DJ: buscando más temas de la época…';
-        extendAutoDj().then(() => {
+        statusText.textContent = '📻 Auto-DJ: buscando más música relacionada…';
+        ensureAutoDjBuffer(5).then(() => {
           const n = nextIndex();
           if (n >= 0) { play(n); return; }
           setPlaying({ playing: false });
