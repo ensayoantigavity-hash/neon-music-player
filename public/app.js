@@ -2919,16 +2919,25 @@ const fuzzyCatalog = (query, limit = 8) => {
   };
   restoreUiState();
 
-  // ---- Auto-arranque de radio desde enlace compartido (?radio=género) ----
-  // El navegador bloquea el autoplay con sonido sin un gesto del usuario, así que la
-  // cola y el Auto-DJ se arman solos y el amigo solo debe pulsar ▶ una vez.
+  // ---- Auto-arranque desde enlace compartido ----
+  // ?radio=género → enciende la radio (Auto-DJ) automáticamente.
+  // ?q=término    → solo hace la búsqueda, SIN encender el Auto-DJ (el usuario lo
+  //                 activa cuando quiera). Nunca forzamos el Auto-DJ encendido.
   (() => {
-    const rp = new URLSearchParams(location.search).get('radio') || new URLSearchParams(location.search).get('q');
-    if (!rp) return;
-    autoDjOn = true;
-    if (btnAutodj) btnAutodj.classList.add('on');
-    input.value = rp;
-    showToast('📻 Radio automática: ' + rp);
-    smartPlaylistSearch(rp, rp);
+    const params = new URLSearchParams(location.search);
+    const rp = params.get('radio');
+    if (rp) {
+      autoDjOn = true;
+      if (btnAutodj) btnAutodj.classList.add('on');
+      input.value = rp;
+      showToast('📻 Radio automática: ' + rp);
+      smartPlaylistSearch(rp, rp);
+      return;
+    }
+    const q = params.get('q');
+    if (q) {
+      input.value = q;
+      doSearch(q); // búsqueda normal, Auto-DJ apagado
+    }
   })();
 })();
