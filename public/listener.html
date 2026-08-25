@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>NEON MUSIC · Radio</title>
+  <style>
+    :root { --neon: #19e3ff; --neon2: #ff2bd6; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      background: radial-gradient(1200px 800px at 50% -10%, #16213a 0%, #0a0e1a 55%, #05070f 100%);
+      color: #eaf2ff; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-height: 100%; padding: 20px; text-align: center; overflow: hidden;
+    }
+    .card {
+      width: min(520px, 92vw); padding: 28px 22px; border-radius: 20px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(25,227,255,0.25);
+      box-shadow: 0 0 40px rgba(25,227,255,0.12), inset 0 0 30px rgba(255,43,214,0.05);
+      backdrop-filter: blur(6px);
+    }
+    .logo { font-size: 26px; font-weight: 800; letter-spacing: 1px; margin-bottom: 4px;
+      background: linear-gradient(90deg, var(--neon), var(--neon2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .station { font-size: 13px; color: #9fb6d4; text-transform: uppercase; letter-spacing: 2px; margin: 10px 0 18px; }
+    .cover { width: 180px; height: 180px; border-radius: 16px; margin: 0 auto 16px; object-fit: cover;
+      background: #0c1322; box-shadow: 0 0 30px rgba(25,227,255,0.25); display: none; }
+    .title { font-size: 20px; font-weight: 700; line-height: 1.25; margin: 0 0 4px; }
+    .artist { font-size: 14px; color: #9fb6d4; margin: 0 0 22px; }
+    .status { font-size: 13px; color: #7d93b3; min-height: 18px; }
+    .enter {
+      margin-top: 18px; padding: 14px 26px; font-size: 16px; font-weight: 700; cursor: pointer;
+      color: #04121c; border: none; border-radius: 999px;
+      background: linear-gradient(90deg, var(--neon), var(--neon2)); box-shadow: 0 0 24px rgba(25,227,255,0.4);
+    }
+    .enter:active { transform: scale(0.97); }
+    .hint { font-size: 11px; color: #5f7390; }
+    #yt-host { position: absolute; width: 1px; height: 1px; left: -9999px; top: -9999px; overflow: hidden; }
+    .footer { margin-top: 18px; font-size: 11px; color: #5f7390; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">♪ NEON MUSIC</div>
+    <div class="station" id="station">RADIO EN VIVO</div>
+    <img class="cover" id="cover" alt="" />
+    <div class="title" id="title">Esperando al DJ…</div>
+    <div class="artist" id="artist">El que comparte eligió la música</div>
+    <div class="status" id="status">Conéctate para escuchar la radio</div>
+    <button class="enter" id="enter">▶ Entrar a la radio</button>
+    <div class="footer">Solo audio · sin buscar ni adelantar</div>
+  </div>
+  <div id="yt-host"></div>
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="/listener.js"></script>
+</body>
+</html>

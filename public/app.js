@@ -130,8 +130,25 @@
     setAttribute() {}
     getAttribute() { return null; }
   }
-
   const audio = new AudioShim(realAudioEl);
+
+  // Avisa al servidor qué tema suena ahora (alimenta el "solo reproductor" de los amigos)
+  const pushStation = () => {
+    try {
+      if (!(audio.__isShim && audio.mode === 'yt')) return;
+      const t = (!playingFile && current >= 0) ? listOf(activeSrc)[current] : null;
+      if (!t || !t.id) return;
+      fetch('/api/nowplaying', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: t.id, title: t.title || '', artist: (t.artist || t.channel || ''),
+          thumbnail: t.thumbnail || '', duration: t.duration || 0,
+          playing: !audio.paused, station: autoDjSeed.query || lastQuery || '',
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+  };
+
   const form = $('#search-form');
   const input = $('#query');
   const statusText = $('#status-text');
@@ -1024,6 +1041,7 @@ updatePlaylistCount();
         playIntent = true; setPlaying({ playing: false }); showToast('▶ Toca el botón de reproducir', true);
       });
       setPlaying({ playing: true, track });
+      pushStation();
       playIntent = true; pushMedia(track); updateMss(true);
       liveBadge.classList.toggle('hidden', true);
       durBadge.textContent = track.duration ? fmt(track.duration) : '';
@@ -2573,6 +2591,10 @@ const fuzzyCatalog = (query, limit = 8) => {
     }
     setPlaying({ playing: false });
   });
+
+  // Sincroniza pausa/reanudación del DJ con el "solo reproductor" de los amigos
+  audio.addEventListener('playing', () => { if (nativeMode) return; pushStation(); });
+  audio.addEventListener('pause', () => { if (nativeMode) return; pushStation(); });
 
   const errLabel = () => {
     const c = audio.error ? audio.error.code : 0;

@@ -191,6 +191,32 @@ app.get('/api/config', (req, res) => {
   });
 });
 
+// ---- "Solo reproductor" (modo escucha): el DJ (app completa) avisa qué tema suena,
+// y los amigos lo escuchan en /escuchar sin buscar ni adelantar/retroceder. ----
+let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '' };
+app.post('/api/nowplaying', express.json(), (req, res) => {
+  const b = req.body || {};
+  if (typeof b.id === 'string' && /^[\w-]{11}$/.test(b.id)) {
+    nowPlaying = {
+      id: b.id,
+      title: String(b.title || ''),
+      artist: String(b.artist || ''),
+      thumbnail: String(b.thumbnail || ''),
+      duration: Number(b.duration) || 0,
+      playing: b.playing !== false && b.playing !== false,
+      station: String(b.station || ''),
+    };
+    nowPlaying.playing = b.playing !== false;
+  }
+  res.json({ ok: true });
+});
+app.get('/api/nowplaying', (req, res) => res.json(nowPlaying));
+
+// página del listener (solo audio, sin controles de búsqueda/seek)
+app.get('/escuchar', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'listener.html'));
+});
+
 // ---- proxy de imágenes (mismo origen para leer el color vía <canvas>) ----
 app.get('/api/img', async (req, res) => {
   const u = String(req.query.u || '');
