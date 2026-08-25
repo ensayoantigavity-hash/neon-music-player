@@ -274,6 +274,28 @@ function autoDjArgs() {
 const FALLBACK_SEEDS = ['lofi hip hop mix', 'musica instrumental relajante', 'jazz suave instrumental', 'clasicos instrumentales'];
 const sleepMs = (ms) => new Promise(r => setTimeout(r, ms));
 
+// Transmite UN video a los oyentes reutilizando el camino probado de /api/stream:
+// resuelve la URL firmada de googlevideo y la pipa desde Node (sin bot-check extra)
+async function streamOneToListeners(id) {
+    try {
+        const gurl = await getPlayableStream(id);
+        const upstream = await fetch(gurl, { redirect: 'follow' });
+        if (!upstream.ok || !upstream.body) throw new Error('upstream HTTP ' + upstream.status);
+        const reader = upstream.body.getReader();
+        for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (djConnected) { try { reader.cancel(); } catch {} break; }
+            radioStats.bytesEnviados += value.length;
+            const buf = Buffer.from(value);
+            for (const listener of listeners) { try { listener.write(buf); } catch {} }
+        }
+    } catch (e) {
+        radioStats.ultimoError = String(e.message || e).slice(0, 200);
+        failedIds.set(id, Date.now()); // no reintentar este tema por un rato
+    }
+}
+
 // Bucle DJ: llena lista de IDs (filtra lives) -> transmite cada video uno tras otro
 async function autoDjLoop() {
     while (!djConnected) {
@@ -295,36 +317,7 @@ async function autoDjLoop() {
         if (djConnected) return;
         for (const id of ids) {
             if (djConnected) return;
-            await new Promise((resolve) => {
-                getYtdlp().then(bin => {
-                    if (!bin || djConnected) return resolve();
-                    let p;
-                    try {
-                        p = spawn(bin[0], [...bin.slice(1), ...autoDjArgs(), `https://www.youtube.com/watch?v=${id}`], { stdio: ['ignore', 'pipe', 'pipe'] });
-                    } catch (e) { radioStats.ultimoError = e.message; return resolve(); }
-                    autoDJProcess = p;
-                    radioStats.arranques++;
-                    p.on('error', (err) => {
-                        radioStats.ultimoError = err.message;
-                        if (autoDJProcess === p) autoDJProcess = null;
-                        resolve();
-                    });
-                    p.stderr.on('data', d => {
-                        const s = d.toString().trim().split('\n').pop();
-                        if (s && !/^\[download\]/.test(s)) radioStats.ultimoError = s.slice(0, 200);
-                    });
-                    p.stdout.on('data', chunk => {
-                        radioStats.bytesEnviados += chunk.length;
-                        if (djConnected) { stopAutoDJ(); return; }
-                        for (const listener of listeners) { try { listener.write(chunk); } catch {} }
-                    });
-                    p.on('close', (code) => {
-                        radioStats.salidas++;
-                        if (autoDJProcess === p) autoDJProcess = null;
-                        resolve();
-                    });
-                });
-            });
+            await streamOneToListeners(id);
             await sleepMs(350); // micro-pausa entre temas
         }
         if (!djConnected) await sleepMs(4000); // nueva semilla al agotar la lista
