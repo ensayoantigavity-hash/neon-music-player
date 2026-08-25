@@ -294,6 +294,31 @@ let listeners = [];
 
 // Telemetria del Auto-DJ (diagnostico remoto via /api/radiostatus)
 const radioStats = { arranques: 0, salidas: 0, ultimoError: '', bytesEnviados: 0 };
+let lastAudioAt = 0;      // ultima vez que fluyo audio real (googlevideo)
+let gapProc = null;       // ffmpeg rellenando cortina durante huecos
+const STATION_MP3 = path.join(__dirname, 'public', 'station-id.mp3');
+
+// Anti-silencio: si no hay audio real >5s y hay oyentes, transmite la cortina en bucle
+// hasta que vuelvan los bytes reales. El oyente NUNCA queda mudo.
+setInterval(() => {
+    const silencio = Date.now() - lastAudioAt > 5000;
+    if (!silencio || djConnected || gapProc) {
+        // hay audio real o DJ o ya esta rellenando -> apagar el relleno si sobra
+        if (gapProc && (!silencio || djConnected)) { try { gapProc.kill(); } catch {} gapProc = null; }
+        return;
+    }
+    if (!existsSync(STATION_MP3)) return;
+    try {
+        gapProc = spawn('ffmpeg', ['-re', '-stream_loop', '-1', '-i', STATION_MP3,
+            '-c:a', 'libmp3lame', '-b:a', '96k', '-f', 'mp3', 'pipe:1'],
+            { stdio: ['ignore', 'pipe', 'pipe'] });
+        gapProc.stdout.on('data', chunk => {
+            for (const l of listeners) { try { l.write(chunk); } catch {} }
+        });
+        gapProc.on('error', () => { gapProc = null; });
+        gapProc.on('close', () => { gapProc = null; });
+    } catch { gapProc = null; }
+}, 1000);
 
 app.get('/radio/stream', (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
@@ -339,6 +364,7 @@ async function streamOneToListeners(id) {
             const { done, value } = await reader.read();
             if (done) break;
             if (djConnected) { try { reader.cancel(); } catch {} break; }
+            lastAudioAt = Date.now();
             radioStats.bytesEnviados += value.length;
             const buf = Buffer.from(value);
             for (const listener of listeners) { try { listener.write(buf); } catch {} }
@@ -353,7 +379,11 @@ async function streamOneToListeners(id) {
 async function autoDjLoop() {
     while (!djConnected) {
         let ids = [];
-        const seed = FALLBACK_SEEDS[Math.floor(Math.random() * FALLBACK_SEEDS.length)];
+        // Prioridad: lo ultimo buscado en la app (station) -> asi la radio sigue el gusto actual
+        const stationSeed = (nowPlaying.station || '').trim();
+        const seed = (stationSeed && Math.random() < 0.6)
+            ? stationSeed
+            : FALLBACK_SEEDS[Math.floor(Math.random() * FALLBACK_SEEDS.length)];
         // 1) Innertube directo (rapido, sin yt-dlp)
         try {
             console.log('[neon] Auto-DJ buscando (innertube): ' + seed);
