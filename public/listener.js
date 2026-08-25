@@ -266,11 +266,30 @@
     }
   };
 
+  // Play/Pausa: si está sonando, pausa. Si está pausado, reanuda y se sincroniza
+  // con lo que Neon Music está emitiendo en este momento (master) o sigue la radio.
   playBtn.addEventListener('click', () => {
-    if (!currentYtId) return;
-    if (audio.paused) { audio.play().catch(() => {}); userPaused = false; }
-    else { audio.pause(); userPaused = true; }
+    if (!audio.paused) { audio.pause(); userPaused = true; return; }
+    userPaused = false;
+    if (lastData && lastData.id) {
+      followMaster(lastData);            // sincroniza al tema actual del master
+    } else if (currentSource === 'local') {
+      if (currentYtId && currentYtId !== JINGLE) audio.play().catch(() => {});
+      else playLocalNext();              // no hay tema local aún: busca uno
+    } else {
+      startLocal();                      // arranca la radio autónoma
+    }
   });
+
+  // Autoarranque: intenta sonar al cargar; si el navegador lo bloquea, el primer
+  // toque en cualquier parte de la página lo libera (política de autoplay).
+  const unlock = () => {
+    if (currentYtId && audio.paused && !userPaused) audio.play().catch(() => {});
+    window.removeEventListener('pointerdown', unlock);
+    window.removeEventListener('touchstart', unlock);
+  };
+  window.addEventListener('pointerdown', unlock);
+  window.addEventListener('touchstart', unlock);
 
   vol.addEventListener('input', () => { audio.volume = vol.value / 100; vol.style.setProperty('--pct', vol.value + '%'); });
   vol.style.setProperty('--pct', '80%');
