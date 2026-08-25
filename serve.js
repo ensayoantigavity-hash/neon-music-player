@@ -163,7 +163,7 @@ function seekUrl(out) {
   return out.split(/\r?\n/).map(l => l.trim()).find(l => l.startsWith('http'));
 }
 
-async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } = {}) {
+async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false, fmt = 'ba/b', timeoutMs = 35000 } = {}) {
   const cached = streamCache.get(videoId);
   if (!force && cached && cached.expires > Date.now()) return cached.url;
   if (cached) streamCache.delete(videoId);
@@ -181,14 +181,14 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
 
   const args = [
     ...cookieArgs(),
-    '--no-playlist', '-f', 'ba/b', '-g', '--no-warnings',
+    '--no-playlist', '-f', fmt, '-g', '--no-warnings',
     '--socket-timeout', '15',
     '--retries', '2', '--extractor-retries', '3',
     '--extractor-args', `youtube:player_client=${order.join(',')};youtube:player_skip=webpage,configs`,
     '--extractor-args', 'youtubetab:skip=webpage',
     `https://www.youtube.com/watch?v=${videoId}`,
   ];
-  const out = await runYt(args, 60000);
+  const out = await runYt(args, timeoutMs);
   const url = seekUrl(out);
   if (!url) throw new Error('No se pudo resolver el stream de audio');
   streamCache.set(videoId, { url, expires: Date.now() + 45 * 60 * 1000 });
@@ -216,12 +216,12 @@ function getPlayableStream(videoId) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) streamCache.delete(videoId);
-        // intento0: cadena movil tv-first | intento1: web/mweb con cookies | intento2: invertida
-        let clients;
-        if (attempt === 0) clients = CLIENT_CHAIN;
-        else if (attempt === 1) clients = ['web', 'mweb'];
-        else clients = ['android', 'ios'];
-        const url = await resolveStream(videoId, { clients, force: attempt > 0 });
+        // intento0: cadena movil + bestaudio | intento1: web/mweb con cookies + cualquier formato | intento2: android/ios + b
+        let clients, fmt;
+        if (attempt === 0) { clients = CLIENT_CHAIN; fmt = 'ba/b'; }
+        else if (attempt === 1) { clients = ['web', 'mweb']; fmt = 'b'; }
+        else { clients = ['android', 'ios']; fmt = 'b'; }
+        const url = await resolveStream(videoId, { clients, force: attempt > 0, fmt });
         // Sin probe para velocidad: la URL directa de googlevideo es valida si yt-dlp la dio
         if (url && url.startsWith('http')) return url;
         throw new Error('stream vac+�o');
