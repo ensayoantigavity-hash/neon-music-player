@@ -66,30 +66,49 @@ function canRun(cmd, args) {
 }
 async function ensureYtdlp() {
   const LOCAL_BIN = path.join(__dirname, 'bin', 'yt-dlp');
-  if (existsSync(LOCAL_BIN)) { console.log('[neon] yt-dlp local listo'); return [LOCAL_BIN]; }
+  if (existsSync(LOCAL_BIN)) return [LOCAL_BIN];
   if (canRun('yt-dlp', ['--version'])) { console.log('[neon] yt-dlp global encontrado'); return ['yt-dlp']; }
   if (canRun('python', ['-m', 'yt_dlp', '--version'])) { console.log('[neon] usando python -m yt_dlp'); return ['python', '-m', 'yt_dlp']; }
-  try {
-    mkdirSync(path.dirname(LOCAL_BIN), { recursive: true });
-    console.log('[neon] descargando binario yt-dlp standalone...');
-    const r = await fetch('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux', { redirect: 'follow' });
-    if (r.ok) {
-      writeFileSync(LOCAL_BIN, Buffer.from(await r.arrayBuffer()));
-      try { chmodSync(LOCAL_BIN, 0o755); } catch { /* noop */ }
-      console.log('[neon] yt-dlp descargado y activo');
-      return [LOCAL_BIN];
-    }
-  } catch (e) { console.log('[neon] fallo descarga yt-dlp: ' + e.message); }
+  // Descarga standalone con 3 intentos (GitHub puede fallar transitoriamente)
+  mkdirSync(path.dirname(LOCAL_BIN), { recursive: true });
+  for (let intento = 1; intento <= 3; intento++) {
+    try {
+      console.log(`[neon] descargando binario yt-dlp standalone (intento ${intento}/3)...`);
+      const r = await fetch('https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux', { redirect: 'follow' });
+      if (r.ok) {
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 1000000) { // binario real >1MB, no una pagina de error
+          writeFileSync(LOCAL_BIN, buf);
+          try { chmodSync(LOCAL_BIN, 0o755); } catch { /* noop */ }
+          console.log('[neon] yt-dlp descargado y activo (' + Math.round(buf.length / 1048576) + 'MB)');
+          return [LOCAL_BIN];
+        }
+      }
+      console.log('[neon] descarga intento ' + intento + ' fallo (HTTP ' + r.status + ')');
+    } catch (e) { console.log('[neon] descarga intento ' + intento + ' error: ' + e.message); }
+    await new Promise(res => setTimeout(res, 3000 * intento));
+  }
   return null;
 }
-const YTDLP_READY = ensureYtdlp().then(bin => {
-  if (!bin) { console.log('[neon] ATENCIÓN: sin yt-dlp, solo búsqueda Innertube'); return null; }
-  YTDLP_BIN = bin;
-  return bin;
-}).catch(() => null);
+// Resolucion re-intentable: si falla, el proximo runYt/startAutoDJ vuelve a intentar
+let ytdlpBin = null;
+let ytdlpInflight = null;
+function getYtdlp() {
+  if (ytdlpBin) return Promise.resolve(ytdlpBin);
+  if (!ytdlpInflight) {
+    ytdlpInflight = ensureYtdlp().then(bin => {
+      ytdlpInflight = null;
+      if (!bin) return null;
+      ytdlpBin = bin;
+      YTDLP_BIN = bin;
+      return bin;
+    }).catch(() => { ytdlpInflight = null; return null; });
+  }
+  return ytdlpInflight;
+}
 
 async function runYt(args, timeoutMs = 90000) {
-  const bin = await YTDLP_READY;
+  const bin = await getYtdlp();
   if (!bin) throw new Error('yt-dlp no disponible en este servidor');
   return new Promise((resolve, reject) => {
     const p = spawn(bin[0], [...bin.slice(1), ...args], {
@@ -248,7 +267,7 @@ function autoDjArgs() {
 async function startAutoDJ() {
     if (djConnected || autoDJProcess) return;
     // Espera el binario resuelto (global o descargado); nunca spawn a ciegas
-    const bin = await YTDLP_READY;
+    const bin = await getYtdlp();
     if (!bin) { setTimeout(startAutoDJ, 15000); return; }
     console.log("DJ principal desconectado. Activando Auto-DJ de respaldo...");
     let p;
