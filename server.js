@@ -11,7 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = parseInt(process.env.PORT || '8765', 10);
 const YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
-const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web_embedded,web_smarttv,android_vr,mweb')
+const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios')
   .split(',').map(s => s.trim()).filter(Boolean);
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || path.join(__dirname, 'Descargas');
 mkdirSync(DOWNLOAD_DIR, { recursive: true });
@@ -111,7 +111,7 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
     // y baja android/mweb al inicio (clientes de menor huella de "bot"). El orden se
     // rota en cada resolución para no repetir la misma combinación contra YouTube.
     order.sort(() => Math.random() - 0.5);
-    const preferred = ['tv', 'android', 'web_smarttv', 'android_vr', 'mweb', 'ios', 'web_embedded'];
+    const preferred = ['tv', 'android', 'ios'];
     order.sort((a, b) => (preferred.indexOf(b) - preferred.indexOf(a)) || (Math.random() - 0.5));
   }
 
@@ -120,7 +120,8 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
     '--no-playlist', '-f', 'ba/b', '-g', '--no-warnings',
     '--socket-timeout', '15',
     '--retries', '2', '--extractor-retries', '3',
-    '--extractor-args', `youtube:player_client=${order.join(',')}`,
+    '--extractor-args', `youtube:player_client=${order.join(',')};youtube:player_skip=webpage,configs`,
+    '--extractor-args', 'youtubetab:skip=webpage',
     `https://www.youtube.com/watch?v=${videoId}`,
   ];
   const out = await runYt(args, 60000);

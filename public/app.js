@@ -2783,6 +2783,23 @@ const fuzzyCatalog = (query, limit = 8) => {
       setTimeout(() => play(current), 250);
       return;
     }
+    // Fallback a iframe (usa IP del cliente) cuando el stream del servidor falla por bloqueo/bot en Render
+    if (track && !playingFile && !nativeMode && !(audio.__isShim && audio.mode === 'yt') && !blockedYt.has(track.id)) {
+      dbg('↻ fallback iframe para ' + track.id + ' (stream bloqueado)');
+      audio.src = 'yt:' + track.id;
+      audio.play().then(() => { consecFails = 0; setEngine(true); }).catch(() => {
+        blockedYt.add(track.id);
+        consecFails++;
+        if (consecFails < 4 && autonext.checked && queue().length) {
+          const n = nextIndex();
+          setTimeout(() => { if (n >= 0) play(n); }, 400);
+        } else {
+          setPlaying({ playing: false });
+          statusText.textContent = `no se pudo reproducir · ${errLabel()}`;
+        }
+      });
+      return;
+    }
     const name = playingFile ? 'archivo' : (track && track.title) || 'tema';
     consecFails++;
     if (!playingFile && consecFails < 4 && autonext.checked && queue().length) {
