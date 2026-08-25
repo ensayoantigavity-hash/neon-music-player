@@ -467,15 +467,6 @@ async function autoDjLoop() {
         }
         if (!djConnected && !clonando) await sleepMs(4000); // nueva semilla al agotar la lista
     }
-        }
-        if (djConnected) return;
-        for (const id of ids) {
-            if (djConnected) return;
-            await streamOneToListeners(id);
-            await sleepMs(350); // micro-pausa entre temas
-        }
-        if (!djConnected) await sleepMs(4000); // nueva semilla al agotar la lista
-    }
 }
 let autoDjLoopIniciado = false;
 function startAutoDJ() {
