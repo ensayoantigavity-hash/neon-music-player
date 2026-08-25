@@ -6,6 +6,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import dgram from 'node:dgram';
 import os from 'node:os';
+import http from 'node:http';
+import { Server } from 'socket.io';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -173,6 +175,69 @@ function getPlayableStream(videoId) {
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+let djConnected = false;
+let currentDJSocket = null;
+let autoDJProcess = null;
+let listeners = [];
+
+app.get('/radio/stream', (req, res) => {
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Transfer-Encoding', 'chunked');
+    listeners.push(res);
+    req.on('close', () => {
+        listeners = listeners.filter(l => l !== res);
+    });
+});
+function startAutoDJ() {
+    if (djConnected || autoDJProcess) return;
+    console.log("DJ principal desconectado. Activando Auto-DJ de respaldo...");
+    autoDJProcess = spawn('yt-dlp', [
+        '--cookies', 'cookies.txt',
+        '-f', 'bestaudio',
+        '-o', '-',
+        'ytsearch:lofi music en vivo'
+    ]);
+    autoDJProcess.stdout.on('data', (chunk) => {
+        if (djConnected) { stopAutoDJ(); return; }
+        listeners.forEach(listener => listener.write(chunk));
+    });
+    autoDJProcess.on('close', () => {
+        autoDJProcess = null;
+        if (!djConnected) startAutoDJ();
+    });
+}
+function stopAutoDJ() {
+    if (autoDJProcess) {
+        autoDJProcess.kill();
+        autoDJProcess = null;
+        console.log("DJ real detectado. Auto-DJ apagado exitosamente.");
+    }
+}
+io.on('connection', (socket) => {
+    socket.on('registrar-dj', () => {
+        djConnected = true;
+        currentDJSocket = socket.id;
+        stopAutoDJ();
+        console.log("DJ Principal conectado y transmitiendo en vivo.");
+    });
+    socket.on('stream-desde-dj', (audioChunk) => {
+        if (socket.id === currentDJSocket) {
+            listeners.forEach(listener => listener.write(audioChunk));
+        }
+    });
+    socket.on('disconnect', () => {
+        if (socket.id === currentDJSocket) {
+            djConnected = false;
+            currentDJSocket = null;
+            startAutoDJ();
+        }
+    });
+});
+startAutoDJ();
+
 app.get('/api/ping', (req, res) => {
   res.json({
     ok: true,
@@ -228,7 +293,7 @@ app.get('/api/nowplaying', (req, res) => {
 
 // página del listener (solo audio, sin controles de búsqueda/seek)
 app.get('/escuchar', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'listener.html'));
+  res.sendFile(path.resolve('public', 'listener.html'));
 });
 
 // ---- proxy de imágenes (mismo origen para leer el color vía <canvas>) ----
@@ -651,7 +716,7 @@ app.get('/api/search', async (req, res) => {
           out = out.concat(fbPool.slice(0, 25 - out.length).map(toResult));
         } catch {}
       }
-      // Último recurso: yt-dlp directo si aún <5 (garantiza salsa/merengue/pop)
+      // Último recurso: yt-dlp directo si aún <5 (garantiza salsa/merengue/pop) - sin filtro estricto
       if (out.length < 5) {
         try {
           const ytdlRaw = await runYt(['--flat-playlist','--dump-json','--no-warnings','--socket-timeout','12',`ytsearch15:${q}`], 20000);
@@ -659,10 +724,10 @@ app.get('/api/search', async (req, res) => {
           for (const line of lines) {
             try {
               const j = JSON.parse(line);
-              if (!j.id || seen.has(j.id) || failedIds.has(j.id)) continue;
-              // Fallback permisivo: solo filtra duración 30-3600, no NON_MUSIC_RE estricto
+              if (!j.id || seen.has(j.id)) continue;
               const t = { id: j.id, title: cleanTitle(j.title||''), channel: stripTopic(j.channel||j.uploader||''), duration: Number(j.duration)||0, views: Number(j.view_count)||0, thumbnail: `https://i.ytimg.com/vi/${j.id}/hq720.jpg` };
-              if (!t.duration || t.duration < 30 || t.duration > 3600) continue;
+              // Solo filtra duración, ignora NON_MUSIC_RE y failedIds para garantizar resultados
+              if (t.duration && (t.duration < 30 || t.duration > 3600)) continue;
               seen.set(t.id, t);
               out.push(toResult(t));
               if (out.length >= 15) break;
@@ -686,6 +751,24 @@ app.get('/api/search', async (req, res) => {
       }
       jitterSort(pool);
       out = pool.slice(0, 25).map(toResult);
+      if (!out.length) {
+        try {
+          const ytdlRaw = await runYt(['--flat-playlist','--dump-json','--no-warnings','--socket-timeout','12',`ytsearch15:${q}`], 20000);
+          const lines = ytdlRaw.split('\n').filter(l=>l.trim().startsWith('{'));
+          const fbSeen = new Set();
+          for (const line of lines) {
+            try {
+              const j = JSON.parse(line);
+              if (!j.id || seen.has(j.id)) continue;
+              const t = { id: j.id, title: cleanTitle(j.title||''), channel: stripTopic(j.channel||j.uploader||''), duration: Number(j.duration)||0, views: Number(j.view_count)||0, thumbnail: `https://i.ytimg.com/vi/${j.id}/hq720.jpg` };
+              if (t.duration && (t.duration < 30 || t.duration > 3600)) continue;
+              fbSeen.add(j.id);
+              out.push(toResult(t));
+              if (out.length >= 10) break;
+            } catch {}
+          }
+        } catch {}
+      }
     }
 
     // arranque super rapido: pre-resolver el stream del primer resultado mientras se
@@ -1118,7 +1201,7 @@ app.get('/api/lyrics', async (req, res) => {
 
 app.use('/dl', express.static(DOWNLOAD_DIR, { dotfiles: 'deny' }));
 
-app.listen(PORT, '0.0.0.0', () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  ▤ Reproductor activo  →  http://localhost:${PORT}`);
   // URLs compartibles con amigos (misma red/WiFi): lista todas las IP locales
   try {
