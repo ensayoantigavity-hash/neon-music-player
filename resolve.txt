@@ -1,0 +1,10 @@
+﻿python : ERROR: [youtube] 2Vv-BfVoq4g: Sign in to confirm youÆre not a bot. Use --cookies-from-browser or --cookies 
+for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to 
+manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips 
+on effectively exporting YouTube cookies
+En línea: 1 Carácter: 1
++ python -m yt_dlp --no-playlist -f ba/b -g --no-warnings --socket-time ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (ERROR: [youtube...YouTube cookies:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
