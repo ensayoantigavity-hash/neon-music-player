@@ -2796,16 +2796,24 @@ const fuzzyCatalog = (query, limit = 8) => {
       return;
     }
     const name = playingFile ? 'archivo' : (track && track.title) || 'tema';
-    consecFails++;
-    if (!playingFile && consecFails < 4 && autonext.checked && queue().length) {
-      const n = nextIndex();
-      setTimeout(() => { if (n >= 0) play(n); }, 400);
-    } else {
-      setPlaying({ playing: false });
-      consecFails = 0;
-      statusText.textContent = playingFile ? 'error de archivo' : `no se pudo reproducir · ${errLabel()}`;
-      warnProtected();
+    // Forzar reproducción: reintenta el MISMO audio sin saltar de lista (evita salto continuo)
+    if (!playingFile && consecFails < 6) {
+      consecFails++;
+      statusText.textContent = `reintentando ${name}… (${consecFails}/6)`;
+      // Limpia cache de stream fallido para forzar nueva resolución con otro cliente
+      if (track) { try{ streamCache.delete(track.id); failedIds.delete(track.id); }catch{} }
+      setTimeout(() => play(current), 1200);
+      return;
     }
+    // Solo tras 6 reintentos del mismo, saltar al siguiente si hay autonext
+    if (!playingFile && autonext.checked && queue().length) {
+      const n = nextIndex();
+      if (n >= 0) { consecFails = 0; setTimeout(() => play(n), 400); return; }
+    }
+    setPlaying({ playing: false });
+    consecFails = 0;
+    statusText.textContent = playingFile ? 'error de archivo' : `no se pudo reproducir · ${errLabel()}`;
+    warnProtected();
   });
 
   // ---------- redimensionar columnas (menú y reproductor) ----------

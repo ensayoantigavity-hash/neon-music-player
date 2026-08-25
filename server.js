@@ -638,6 +638,24 @@ app.get('/api/search', async (req, res) => {
       const dj = Array.from(seen.values());
       jitterSort(dj);
       out = dj.slice(0, 100).map(toResult);
+      // Garantía: si la colección DJ quedó vacía (bloqueo Innertube), fallback a búsqueda simple
+      if (!out.length) {
+        try {
+          const fbRaw = await ytSearchPages(q, 30, 2);
+          const fbSeen = new Set();
+          const fbPool = [];
+          for (const t of fbRaw) {
+            if (!isMusicVideo(t)) continue;
+            if (fbSeen.has(t.id)) continue;
+            fbSeen.add(t.id);
+            t.title = cleanTitle(t.title);
+            t.channel = stripTopic(t.channel);
+            fbPool.push(t);
+          }
+          jitterSort(fbPool);
+          out = fbPool.slice(0, 25).map(toResult);
+        } catch {}
+      }
     } else {
       // cancion: busca a fondo y varía el resultado en cada lanzamiento (mismo
       // sentido de la palabra, pero distinto orden/subconjunto como un DJ).
