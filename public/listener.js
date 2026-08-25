@@ -311,12 +311,23 @@
   };
 
   // Llamados desde el reproductor nativo (APK) cuando un tema termina o falla.
+  // Si el DJ (master) sigue activo, nos sincronizamos con su siguiente tema; si
+  // no (PC apagada / sin DJ), el Auto-DJ local sigue sonando sin parar.
+  const masterGone = async () => {
+    try {
+      const r = await fetch('/api/nowplaying');
+      const d = await r.json();
+      if (d && d.id && d.id !== currentYtId) { followMaster(d); return false; }
+    } catch (e) {}
+    return true;
+  };
   window.__neonTrackEnded = () => {
     if (currentSource === 'local') {
       if (playingJingle) { playingJingle = false; playLocalNext(); }
       else { playJingle(); }
+    } else if (currentSource === 'master') {
+      masterGone().then((gone) => { if (gone) startLocal(); });
     }
-    // En modo master el poll enviará el siguiente tema cuando el DJ cambie.
   };
   window.__neonTrackError = () => {
     if (currentSource === 'local') {
@@ -325,11 +336,7 @@
       else { playJingle(); }
     } else if (currentSource === 'master') {
       if (currentYtId && currentYtId !== JINGLE) blockedNativeIds.add(currentYtId);
-      if (lastMasterData && lastMasterData.id && !blockedNativeIds.has(lastMasterData.id)) {
-        currentYtId = ''; followMaster(lastMasterData);
-      } else {
-        startLocal();
-      }
+      masterGone().then((gone) => { if (gone) startLocal(); });
     }
   };
 

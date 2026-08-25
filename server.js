@@ -193,7 +193,8 @@ app.get('/api/config', (req, res) => {
 
 // ---- "Solo reproductor" (modo escucha): el DJ (app completa) avisa qué tema suena,
 // y los amigos lo escuchan en /escuchar sin buscar ni adelantar/retroceder. ----
-let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '' }; // estado de la "solo reproductor" (se reinicia con cada deploy)
+let nowPlaying = { id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '', ts: 0 }; // estado de la "solo reproductor" (se reinicia con cada deploy)
+const NOWPLAYING_TTL = 9000; // ms: si el DJ no envía latido en este tiempo, se considera desconectado
 app.post('/api/nowplaying', express.json(), (req, res) => {
   const b = req.body || {};
   if (typeof b.id === 'string' && /^[\w-]{11}$/.test(b.id)) {
@@ -205,12 +206,20 @@ app.post('/api/nowplaying', express.json(), (req, res) => {
       duration: Number(b.duration) || 0,
       playing: b.playing !== false && b.playing !== false,
       station: String(b.station || ''),
+      ts: Date.now(),
     };
     nowPlaying.playing = b.playing !== false;
   }
   res.json({ ok: true });
 });
-app.get('/api/nowplaying', (req, res) => res.json(nowPlaying));
+app.get('/api/nowplaying', (req, res) => {
+  // Si pasó el TTL sin latido del DJ, ocultamos el tema para que el listener
+  // (y la app) pasen al Auto-DJ y la música nunca se detenga.
+  if (nowPlaying.id && nowPlaying.ts && (Date.now() - nowPlaying.ts > NOWPLAYING_TTL)) {
+    return res.json({ id: '', title: '', artist: '', thumbnail: '', duration: 0, playing: false, station: '' });
+  }
+  res.json(nowPlaying);
+});
 
 // página del listener (solo audio, sin controles de búsqueda/seek)
 app.get('/escuchar', (req, res) => {

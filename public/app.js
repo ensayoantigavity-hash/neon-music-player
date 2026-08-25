@@ -148,6 +148,10 @@
       }).catch(() => {});
     } catch (e) {}
   };
+  // Latido: mantiene fresco el estado del "solo reproductor" mientras el DJ
+  // (esta app) sigue conectado. Si el PC se apaga, deja de latir y el servidor
+  // hace caducar el tema para que el listener pase al Auto-DJ automáticamente.
+  setInterval(() => { try { pushStation(); } catch (ignored) {} }, 4000);
 
   const form = $('#search-form');
   const input = $('#query');
