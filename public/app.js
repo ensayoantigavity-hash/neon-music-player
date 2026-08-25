@@ -63,7 +63,7 @@
           events: {
             onReady: () => { this._ready = true; this._dispatch('loadedmetadata'); this._dispatch('canplay'); },
             onStateChange: (e) => this._onState(e),
-            onError: () => { this._error = { code: 1, message: 'YouTube no pudo reproducir este video (restringido o bloqueado por region)' }; this._dispatch('error'); },
+            onError: (e) => { const c = (e && e.data) || 1; this._error = { code: c, message: 'YouTube bloqueó este video para reproducción embebida (dueño, región o copyright)' }; this._dispatch('error'); },
           },
         });
       }
@@ -539,6 +539,7 @@
   let autoDjOn = false;            // radio infinita por artista/género/época
   let autoDjSeed = { artist: '', query: '' };
   let autoDjBusy = false;          // evita fetches duplicados en paralelo
+  const blockedYt = new Set();     // ids bloqueados por YouTube (embed) para no reintentarlos
   let toastTimer = null;
   let searchMeta = null;
   let searchType = 'track';
@@ -932,12 +933,13 @@ updatePlaylistCount();
       if (data.error || !Array.isArray(data.results)) return;
       const have = new Set(results.map((r) => r.id));
       let added = 0;
-      for (const t of data.results) {
-        if (have.has(t.id)) continue;
-        have.add(t.id);
-        results.push(t);
-        added++;
-      }
+       for (const t of data.results) {
+         if (have.has(t.id)) continue;
+         if (blockedYt.has(t.id)) continue; // omitir los que YouTube bloquea en embed
+         have.add(t.id);
+         results.push(t);
+         added++;
+       }
       if (added) {
         if (activeTab === 'results') renderResults();
         pushNativeQueue();
@@ -2576,6 +2578,24 @@ const fuzzyCatalog = (query, limit = 8) => {
       return;
     }
     clearStall();
+    // Video bloqueado por YouTube en modo embebido (dueño/región/copyright): no sirve de
+    // nada reintentar con otros "modos"; saltamos de inmediato al siguiente.
+    if (audio.__isShim && audio.mode === 'yt') {
+      const track = !playingFile ? listOf(activeSrc)[current] : null;
+      const msg = (audio.error && audio.error.message) || 'Video bloqueado por YouTube';
+      dbg('✖ yt error ' + (audio.error ? audio.error.code : '?') + ' · ' + (track ? track.id : 'archivo'));
+      stopAgc(); setPlaying({ playing: false }); pushPlaying(false); updateMss(false);
+      if (track) blockedYt.add(track.id);
+      if (track && (autonext.checked || autoDjOn) && !playingFile) {
+        showToast('⚠ ' + ((track && track.title) || 'Video') + ': bloqueado por YouTube · saltando…', true);
+        if (loopMode === 2) { audio.currentTime = 0; audio.play().catch(() => {}); return; }
+        if (autoDjOn) { extendAutoDj().then(() => { const n = nextIndex(); if (n >= 0) play(n); else setPlaying({ playing: false }); }); return; }
+        const n = nextIndex();
+        if (n >= 0) { play(n); return; }
+      }
+      statusText.textContent = '⚠ ' + msg;
+      return;
+    }
     const track = playingFile ? null : listOf(activeSrc)[current];
     const errCode = errLabel();
     dbg(`✖ error ${errCode} · ${track ? track.id : 'archivo'}`);
