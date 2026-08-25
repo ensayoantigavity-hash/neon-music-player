@@ -161,7 +161,11 @@
 
   <div id="toast" class="toast"></div>
   <audio id="audio" preload="auto"></audio>
+  <!-- Reproductor de YouTube (cliente): el audio lo entrega el navegador del usuario,
+       así funciona en cualquier host sin que YouTube bloquee la IP del servidor. -->
+  <div id="yt-host" aria-hidden="true" style="position:absolute;width:1px;height:1px;left:-9999px;top:-9999px;overflow:hidden;"></div>
 
+  <script src="https://www.youtube.com/iframe_api"></script>
   <script src="/app.js"></script>
 </body>
 </html>
