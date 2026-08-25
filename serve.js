@@ -173,7 +173,8 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
     // rota en cada resoluci+�n para no repetir la misma combinaci+�n contra YouTube.
     order.sort(() => Math.random() - 0.5);
     const preferred = ['tv', 'android', 'ios', 'web', 'web_embedded', 'mweb'];
-    order.sort((a, b) => (preferred.indexOf(b) - preferred.indexOf(a)) || (Math.random() - 0.5));
+    // Ascendente por preferencia: tv primero (menos bot-check), web_embedded al final
+    order.sort((a, b) => (preferred.indexOf(a) - preferred.indexOf(b)) || (Math.random() - 0.5));
   }
 
   const args = [
