@@ -637,7 +637,7 @@ app.get('/api/search', async (req, res) => {
       const dj = Array.from(seen.values());
       jitterSort(dj);
       out = dj.slice(0, 100).map(toResult);
-      // Garantía: si la colección quedó corta (<10), completar con búsqueda simple
+      // Garantía: si la colección quedó corta (<10), completar con búsqueda simple + fallback yt-dlp
       if (out.length < 10) {
         try {
           const fbRaw = await ytSearchPages(q, 30, 2);
@@ -653,6 +653,24 @@ app.get('/api/search', async (req, res) => {
           }
           jitterSort(fbPool);
           out = out.concat(fbPool.slice(0, 25 - out.length).map(toResult));
+        } catch {}
+      }
+      // Último recurso: yt-dlp directo si aún <5 (evita lista vacía para salsa/merengue/pop)
+      if (out.length < 5) {
+        try {
+          const ytdlRaw = await runYt(['--flat-playlist','--dump-json','--no-warnings','--socket-timeout','12',`ytsearch15:${q}`], 20000);
+          const lines = ytdlRaw.split('\n').filter(l=>l.trim().startsWith('{'));
+          for (const line of lines) {
+            try {
+              const j = JSON.parse(line);
+              if (!j.id || seen.has(j.id)) continue;
+              const t = { id: j.id, title: cleanTitle(j.title||''), channel: stripTopic(j.channel||j.uploader||''), duration: Number(j.duration)||0, views: Number(j.view_count)||0, thumbnail: `https://i.ytimg.com/vi/${j.id}/hq720.jpg` };
+              if (!isMusicVideo(t)) continue;
+              seen.set(t.id, t);
+              out.push(toResult(t));
+              if (out.length >= 15) break;
+            } catch {}
+          }
         } catch {}
       }
     } else {
