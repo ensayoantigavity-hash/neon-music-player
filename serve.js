@@ -216,11 +216,11 @@ function getPlayableStream(videoId) {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         if (attempt > 0) streamCache.delete(videoId);
-        // intento0: cadena movil + bestaudio | intento1: web/mweb con cookies + cualquier formato | intento2: android/ios + b
+        // intento0: WEB CON COOKIES (via fuerte) | intento1: cadena movil | intento2: android/ios muxed
         let clients, fmt;
-        if (attempt === 0) { clients = CLIENT_CHAIN; fmt = 'ba/b'; }
-        else if (attempt === 1) { clients = ['web', 'mweb']; fmt = 'b'; }
-        else { clients = ['android', 'ios']; fmt = 'b'; }
+        if (attempt === 0) { clients = ['web', 'mweb']; fmt = 'ba/b'; }
+        else if (attempt === 1) { clients = CLIENT_CHAIN; fmt = 'ba/b'; }
+        else { clients = ['android', 'ios']; fmt = '18/b'; }
         const url = await resolveStream(videoId, { clients, force: attempt > 0, fmt });
         // Sin probe para velocidad: la URL directa de googlevideo es valida si yt-dlp la dio
         if (url && url.startsWith('http')) return url;
@@ -1070,9 +1070,12 @@ app.get('/api/stream/:id', async (req, res) => {
       return res.end();
     }
 
-    // Descubrir tama+�o total + tipo del stream (probe 0-0, siempre aceptado).
-    const probe = await fetch(url, { headers: { Range: 'bytes=0-0' }, redirect: 'follow' });
+    // Descubrir tamano total + tipo del stream (probe tolerante: con Range y sin Range)
+    let probe = await fetch(url, { headers: { Range: 'bytes=0-0' }, redirect: 'follow' });
     if (!probe.ok) {
+      probe = await fetch(url, { redirect: 'follow' }); // HLS/CDN a veces rechaza Range suelto
+    }
+    if (!probe.ok && probe.status >= 500) {
       streamCache.delete(videoId);
       return res.status(502).json({ error: 'El origen no respondi+� correctamente' });
     }
