@@ -14,8 +14,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = parseInt(process.env.PORT || '8765', 10);
 // Render (runtime node) NO trae yt-dlp: se resuelve al arrancar (global -> python -> descarga oficial)
 let YTDLP_BIN = JSON.parse(process.env.YTDLP_BIN || '["python","-m","yt_dlp"]');
-const CLIENT_CHAIN = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web,web_embedded,mweb')
+// Cadena efectiva: la del entorno + clientes resistentes al bot-check SIEMPRE incluidos
+const _envChain = (process.env.YTDLP_CLIENTS || 'tv,android,ios,web,web_embedded,mweb')
   .split(',').map(s => s.trim()).filter(Boolean);
+const CLIENT_CHAIN = [...new Set([..._envChain, 'tv', 'ios', 'android_vr', 'tv_simply', 'mweb'])];
 const DOWNLOAD_DIR = process.env.DOWNLOAD_DIR || path.join(__dirname, 'Descargas');
 mkdirSync(DOWNLOAD_DIR, { recursive: true });
 
@@ -172,7 +174,7 @@ async function resolveStream(videoId, { clients = CLIENT_CHAIN, force = false } 
     // y baja android/mweb al inicio (clientes de menor huella de "bot"). El orden se
     // rota en cada resoluci+�n para no repetir la misma combinaci+�n contra YouTube.
     order.sort(() => Math.random() - 0.5);
-    const preferred = ['tv', 'android', 'ios', 'web', 'web_embedded', 'mweb'];
+    const preferred = ['tv', 'tv_simply', 'ios', 'android_vr', 'android', 'mweb', 'web', 'web_embedded'];
     // Ascendente por preferencia: tv primero (menos bot-check), web_embedded al final
     order.sort((a, b) => (preferred.indexOf(a) - preferred.indexOf(b)) || (Math.random() - 0.5));
   }
