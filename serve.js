@@ -290,6 +290,9 @@ const radioStats = { arranques: 0, salidas: 0, ultimoError: '', bytesEnviados: 0
 app.get('/radio/stream', (req, res) => {
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Transfer-Encoding', 'chunked');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    try { res.flushHeaders(); } catch {} // cabeceras YA: el oyente ve 200 sin esperar audio
     listeners.push(res);
     req.on('close', () => {
         listeners = listeners.filter(l => l !== res);
