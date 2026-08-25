@@ -311,6 +311,18 @@ app.get('/api/ping', (req, res) => {
   });
 });
 
+// Estado interno de la radio (diagnostico en vivo)
+app.get('/api/radiostatus', (req, res) => {
+  const LOCAL_BIN = path.join(__dirname, 'bin', 'yt-dlp');
+  res.json({
+    djConnected,
+    autoDjActivo: !!autoDJProcess,
+    oyentes: listeners.length,
+    binarioYtdlp: existsSync(LOCAL_BIN) ? LOCAL_BIN : 'no descargado',
+    cookiesOk: existsSync(COOKIES_LOCAL),
+  });
+});
+
 // expone la configuraci+�n de despliegue (Cloud Run fija K_SERVICE autom+�ticamente)
 app.get('/api/config', (req, res) => {
   res.json({
