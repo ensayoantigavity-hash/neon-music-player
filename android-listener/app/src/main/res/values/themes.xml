@@ -1,8 +1,0 @@
-<resources>
-    <style name="Theme.NeonListener" parent="android:Theme.Material.NoActionBar">
-        <item name="android:statusBarColor">#05070f</item>
-        <item name="android:navigationBarColor">#05070f</item>
-        <item name="android:colorBackground">#05070f</item>
-        <item name="android:windowBackground">#05070f</item>
-    </style>
-</resources>
