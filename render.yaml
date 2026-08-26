@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: neon-music-player
-    runtime: node
-    plan: free
-    buildCommand: npm install
-    startCommand: node serve.js
-    autoDeploy: true
